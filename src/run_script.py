@@ -1,8 +1,11 @@
 import argparse
 import os
-from utils import load_mot16_train
-from train import generate_training_samples
+from utils import load_mot16_train, generate_training_samples, get_batch
+from train import loss_fn, train
 from models import RAN
+from torch.optim import Adam
+import torch.nn as nn
+import pickle
 
 def main(args):
     if args.data_set == 1:
@@ -22,25 +25,44 @@ def main(args):
         print('not implemented')
         exit()
 
-    seq_train_fn = os.path.join(os.path.pardir, "seqmaps", seq_train_fn)
-    seq_test_fn = os.path.join(os.path.pardir, "seqmaps", seq_test_fn)
+    mot17_root_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "MOT16"))
 
-    # read in video sequence names
-    with open(seq_train_fn) as fd:
-        seqs_train = [line.rstrip('\n') for line in fd]
+    m = RAN(input_size=4,
+            hidden_size=32,
+            history_size=10,
+            drop_rate=0.5)
 
-    for idx_det, seq in enumerate(seqs_train):
-        seq_root = os.path.join(args.data_root, "train", seq)
-        res_path = os.path.join(os.path.pardir, "res", data_set, seq+".txt")
+    optimizer = Adam(m.parameters(), lr=0.001, betas=(0.9, 0.99), eps=1e-8)
 
-        # load data
-        det, gt, img_fns = load_mot16_train(seq_root)
+    # not NLL. need to unroll
+    criterion = nn.NLLLoss()
 
-        training_trajs = generate_training_samples(det, gt)
+    # load training data =================================================================
+    det, gt, mot_train_seq = load_mot16_train(mot17_root_dir)
+    train_samples = generate_training_samples(det, gt, mot_train_seq)
+    a = get_batch(train_samples)
+    train(m, loss_fn, train_samples)
 
-        m = RAN(input_size=4,
-                hidden_size=32,
-                history_size=10)
+    # Note: not sure how exactly training data is sampled.
+    # My understanding is that it takes a fixed number of
+    # consecutive frames from randomly selected 64 trajectories.
+
+    # 399 total trajs, average 152 frames, median 80, max 1050, min 10
+
+
+    # testing =============================================================================
+    # for idx_det, seq in enumerate(mot17_root_dir):
+    #     seq_root = os.path.join(args.data_root, "train", seq)
+    #     res_path = os.path.join(os.path.pardir, "res", data_set, seq+".txt")
+    #
+    #     # load data
+    #     det, gt, img_fns = load_mot16_train(seq_root)
+    #
+    #     training_trajs = generate_training_samples(det, gt)
+
+
+
+
 
 
 
