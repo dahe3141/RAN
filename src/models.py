@@ -1,6 +1,7 @@
 import math
 import torch as t
 import torch.nn as nn
+from torch.autograd import Variable
 from torch.nn.init import xavier_normal
 from torch.nn.parameter import Parameter
 
@@ -8,6 +9,9 @@ from torch.nn.parameter import Parameter
 class RAN(nn.Module):
     def __init__(self, input_size, hidden_size, history_size, drop_rate):
         super(RAN, self).__init__()
+        self.hidden_size = hidden_size
+        self.inpu_size = input_size
+        self.history_size = history_size
         self.gru = nn.GRU(input_size=input_size,
                           hidden_size=hidden_size,
                           bias=False,
@@ -25,7 +29,12 @@ class RAN(nn.Module):
         return self.linear(self.gru(x))
 
     def init_hidden(self):
-        pass
+        result = Variable(t.zeros(1, 1, self.hidden_size))
+        # if use_cuda:
+        #     return result.cuda()
+        # else:
+        #     return result
+        return result
 
     def init_weight(self):
         pass

@@ -3,20 +3,21 @@ import torch as t
 from utils import get_batch
 import time
 
-def loss_fn(vec):
-    return t.cumsum(t.log(vec), dim=0)
+def loss_fn(x):
+    return -t.cumsum(x, dim=0)
 
 def train(model, criterion, sample):
     """In progress"""
     model.train()
     total_loss = 0
-    start_time = time.time()
     hidden = model.init_hidden()
     for i in range(1):
         traj, idx = get_batch(sample)
         model.zero_grad()
+        loss = 0
         for j in range(traj.shape[0]): # for each time step
             output, hidden = model(traj[j, :, :], hidden, external)
+            loss += output
         loss = criterion()
         loss.backward()
 

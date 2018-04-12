@@ -7,23 +7,26 @@ from torch.optim import Adam
 import torch.nn as nn
 import pickle
 
+
+
+# change the mot17_root_dir to the "MOT16" dir and run
 def main(args):
-    if args.data_set == 1:
-        seq_train_fn = "MOT16-train.txt"
-        seq_test_fn = "MOT16-test.txt"
-        data_set = "MOT16"
-    elif args.data_set == 2:
-        seq_train_fn = "MOT16-train.txt"
-        seq_test_fn = "MOT16-test.txt"
-        data_set = "MOT16"
-        print('not implemented')
-        exit()
-    else:
-        seq_train_fn = "MOT16-train.txt"
-        seq_test_fn = "MOT16-test.txt"
-        data_set = "MOT16"
-        print('not implemented')
-        exit()
+    # if args.data_set == 1:
+    #     seq_train_fn = "MOT16-train.txt"
+    #     seq_test_fn = "MOT16-test.txt"
+    #     data_set = "MOT16"
+    # elif args.data_set == 2:
+    #     seq_train_fn = "MOT16-train.txt"
+    #     seq_test_fn = "MOT16-test.txt"
+    #     data_set = "MOT16"
+    #     print('not implemented')
+    #     exit()
+    # else:
+    #     seq_train_fn = "MOT16-train.txt"
+    #     seq_test_fn = "MOT16-test.txt"
+    #     data_set = "MOT16"
+    #     print('not implemented')
+    #     exit()
 
     mot17_root_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "MOT16"))
 
@@ -35,12 +38,21 @@ def main(args):
     optimizer = Adam(m.parameters(), lr=0.001, betas=(0.9, 0.99), eps=1e-8)
 
     # not NLL. need to unroll
-    criterion = nn.NLLLoss()
+    criterion = loss_fn
 
     # load training data =================================================================
-    det, gt, mot_train_seq = load_mot16_train(mot17_root_dir)
-    train_samples = generate_training_samples(det, gt, mot_train_seq)
-    a = get_batch(train_samples)
+    saved_path = os.path.join(mot17_root_dir, 'train_samples')
+    if os.path.exists(saved_path):
+        with open(saved_path, 'rb') as f:
+            train_samples = pickle.load(f)
+    else:
+        det, gt, mot_train_seq = load_mot16_train(mot17_root_dir)
+        train_samples = generate_training_samples(det, gt, mot_train_seq)
+
+        with open(saved_path, 'wb+') as f:
+            pickle.dump(train_samples, f)
+
+    # a = get_batch(train_samples)
     train(m, loss_fn, train_samples)
 
     # Note: not sure how exactly training data is sampled.
@@ -71,12 +83,12 @@ def main(args):
 
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser(description="to be filled")
-    parser.add_argument('-d', '--data_set', type=int, default=1,
-                        help="1: MOT16; 2: MOT17")
-    parser.add_argument('-p', '--data_root', type=str, default=os.path.join(os.path.pardir, "MOT16"),
-                        help="path to the sequence directory")
-
-    args = parser.parse_args()
-    main(args)
-
+    # parser = argparse.ArgumentParser(description="to be filled")
+    # parser.add_argument('-d', '--data_set', type=int, default=1,
+    #                     help="1: MOT16; 2: MOT17")
+    # parser.add_argument('-p', '--data_root', type=str, default=os.path.join(os.path.pardir, "MOT16"),
+    #                     help="path to the sequence directory")
+    #
+    # args = parser.parse_args()
+    # main(args)
+    main("none")

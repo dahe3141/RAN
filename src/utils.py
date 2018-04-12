@@ -175,8 +175,7 @@ def generate_training_samples(det_all, gt_all, mot_train_seq, min_len=20):
                 bbox_sel = iou(gt_bbox, det_bboxs)
                 # no detected bbox can be associated to gt
                 if len(bbox_sel) == 0:
-                    cc += 1
-                    continue
+                    bbox_sel = np.array(gt_bbox.tolist())
 
                 traj_train = np.vstack((traj_train,
                                     np.hstack((i+1, f[0], bbox_sel))))
@@ -210,8 +209,8 @@ def get_batch(samples, n_traj=64, n_frame=20):
     trajs = [samples[i] for i in idx]
     ret = np.empty((0, n_frame, 6), dtype=np.float32)
     for t in trajs:
-        i = np.random.choice(len(t) - n_frame)
-        sel = t[i:i + 10, :]
+        i = np.random.choice(len(t) - n_frame + 1)
+        sel = t[i:i + n_frame, :]
         ret = np.concatenate((ret, sel[None, :, :]))
     ret = np.swapaxes(ret, 0, 1)
     return ret[:, :, 2:6], ret[:, :, 0:2]
@@ -221,76 +220,3 @@ def get_batch(samples, n_traj=64, n_frame=20):
 
 
 
-
-#=========================================================
-def _load_mot(seq_root, train_flag):
-    """Backup
-
-    Args:
-        seq_root (str): sequence root path e.g. "MOT16/train/MOT16-02/"
-
-    Returns:
-        det (list): data[frame][track]{'bbox_det','score'} in np arrays
-        gt (list): data[frame][track]{'bbox_det','score'} in np arrays
-        img_fns (list):
-
-    expecting files in the following format:
-    for ground truth:
-        <frame_num>,<track_id>,<x>,<y>,<w>,<h>,<conf>,<class>,<vis>
-    for detection:
-        <frame_num>,<-1>,<x>,<y>,<w>,<h>,<conf>,<-1>,<-1>,<-1>
-    """
-
-    # max_frame is read from seqinfo.ini
-    # we may read in other info such as resolution
-    max_frame = 0
-    with open(os.path.join(seq_root, "seqinfo.ini")) as fd:
-        for line in fd:
-            if "seqLength" in line:
-                max_frame = int(line.rstrip("\n").split("=")[1])
-
-    det_path = os.path.join(seq_root, "det", "det.txt")
-    img_dir = os.path.join(seq_root, "img1")
-    raw_det = np.genfromtxt(det_path, delimiter=',', dtype=np.float32)
-    det = []
-    img_fns = []
-
-    if train_flag:
-        gt_path = os.path.join(seq_root, "gt", "gt.txt")
-        raw_gt = np.genfromtxt(gt_path, delimiter=',', dtype=np.float32)
-    gt = []
-
-    # either use end_frame of max_frame
-    end_frame = int(np.max(raw_det[:, 0]))
-    # sanity check
-    assert (end_frame == max_frame), "end_frame, max_frame conflict"
-
-    for i in range(1, end_frame+1):
-
-        idx_det = raw_det[:, 0] == i
-        bbox_det = raw_det[idx_det, 2:6]
-        bbox_det[:, 0:2] += bbox_det[:, 2:4]/2
-        scores_det = raw_det[idx_det, 6]
-
-        dets = []
-        for bb, s in zip(bbox_det, scores_det):
-            dets.append({'bbox_det': (bb[0], bb[1], bb[2], bb[3]), 'score': s})
-        det.append(dets)
-
-        if train_flag:
-            idx_gt = raw_gt[:, 0] == i
-            bbox_gt = raw_gt[idx_gt, 2:6]
-            bbox_gt[:, 0:2] += bbox_gt[:, 2:4]/2
-            id_gt = raw_gt[idx_gt, 1]
-            consider_gt = raw_gt[idx_gt, 6] == 1
-            class_gt = raw_gt[idx_gt, 7]
-            vis_gt = raw_gt[idx_gt, 8]
-            gts = []
-
-            for bb, id_, flag, c, vis in zip(bbox_gt, id_gt, consider_gt, class_gt, vis_gt):
-                gts.append({'bbox_gt': (bb[0], bb[1], bb[2], bb[3]), 'id': int(id_), 'flag': flag, 'class': int(c), 'vis': vis})
-            gt.append(gts)
-
-        img_fns.append(os.path.join(img_dir, format(i, '06d')+'.jpg'))
-
-    return det, gt, img_fns
