@@ -1,9 +1,10 @@
 import argparse
 import os
 from utils import load_mot16_gt, load_mot16_det, generate_training_samples, get_batch
-from train import loss_fn, train
+from train import loss_fn, train, trainIters
 from models import RAN
-from torch.optim import Adam
+
+import torch as t
 import torch.nn as nn
 import pickle
 
@@ -30,17 +31,7 @@ def main(args):
 
     mot16_root_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "MOT16"))
 
-    m = RAN(input_size=4,
-            hidden_size=32,
-            history_size=10,
-            drop_rate=0.5)
-
-    optimizer = Adam(m.parameters(), lr=0.001, betas=(0.9, 0.99), eps=1e-8)
-
-    # not NLL. need to unroll
-    criterion = loss_fn
-
-    # load training data =================================================================
+    # load training data
     saved_path = os.path.join(mot16_root_dir, 'train_samples')
     if os.path.exists(saved_path):
         with open(saved_path, 'rb') as f:
@@ -53,8 +44,23 @@ def main(args):
         with open(saved_path, 'wb+') as f:
             pickle.dump((train_samples, mot_train_seq), f)
 
+    use_cuda = t.cuda.is_available()
+
+    m = RAN(input_size=4,
+            hidden_size=32,
+            history_size=10,
+            drop_rate=0.5)
+
+
+    trainIters(m, train_samples, n_iters=1)
+
+
+
+    # not NLL. need to unroll
+    # criterion = loss_fn
+
     # a = get_batch(train_samples)
-    train(m, loss_fn, train_samples)
+
 
     # Note: not sure how exactly training data is sampled.
     # My understanding is that it takes a fixed number of

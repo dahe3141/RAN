@@ -257,7 +257,19 @@ def get_batch(samples, n_traj=64, n_frame=20):
     return ret[:, :, 2:6], ret[:, :, 0:2]
 
 
+def generate_external(traj):
+    """
 
+    Args:
+        traj(np.array (n_fram, n_traj, n_feature)):
 
+    Returns:
+        external(np.array (n_fram, n_traj, hist_size, n_feature))
+
+    """
+    traj = traj[:, :, None, :]
+    for i in range(traj.shape[0]):
+        pass
+    pass
 
 

@@ -1,23 +1,31 @@
 import numpy as np
 import torch as t
-from utils import get_batch
+from utils import get_batch, generate_external
+from torch.autograd import Variable
 import time
+from torch import optim
+
+use_cuda = t.cuda.is_available()
 
 def loss_fn(x):
     return -t.cumsum(x, dim=0)
 
-def train(model, criterion, sample):
+def train(model, optimizer, traj, n_frame, batch_size):
     """In progress"""
     model.train()
     total_loss = 0
-    hidden = model.init_hidden()
+    # init hidden currently in
+    hidden = model.init_hidden(batch_size) # (1, 1, 32)
     for i in range(1):
-        traj, idx = get_batch(sample)
-        model.zero_grad()
+        optimizer.zero_grad()
         loss = 0
-        for j in range(traj.shape[0]): # for each time step
-            output, hidden = model(traj[j, :, :], hidden, external)
-            loss += output
+        # external = t.zeros(model.history_size, 4)
+        external = generate_external(traj)
+        x = Variable(t.from_numpy(traj.astype(np.float32)), requires_grad=False)
+        if use_cuda:
+            x = x.cuda()
+        output, hidden = model(x, hidden, external)
+        loss += output
         loss = criterion()
         loss.backward()
 
@@ -37,7 +45,43 @@ def train(model, criterion, sample):
         #     start_time = time.time()
 
 
+def trainIters(model, samples, n_iters, n_frame=20, batch_size=64, lr=0.001,
+               betas=(0.9, 0.99), eps=1e-8):
+    if use_cuda:
+        model = model.cuda()
+    # start = time.time()
+    # plot_losses = []
+    # print_loss_total = 0  # Reset every print_every
+    # plot_loss_total = 0  # Reset every plot_every
 
+    optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas, eps=eps)
+
+    # training_pairs = [variablesFromPair(random.choice(pairs))
+    #                   for i in range(n_iters)]
+    # criterion = nn.NLLLoss()
+
+    for iter in range(1, n_iters + 1):
+
+        traj, idx = get_batch(samples, n_traj=batch_size, n_frame=n_frame)
+        # loss = train(input_variable, target_variable, encoder,
+        #              decoder, encoder_optimizer, decoder_optimizer, criterion)
+
+        train(model, optimizer, traj, n_frame, batch_size)
+        # print_loss_total += loss
+        # plot_loss_total += loss
+        #
+        # if iter % print_every == 0:
+        #     print_loss_avg = print_loss_total / print_every
+        #     print_loss_total = 0
+        #     print('%s (%d %d%%) %.4f' % (timeSince(start, iter / n_iters),
+        #                                  iter, iter / n_iters * 100, print_loss_avg))
+        #
+        # if iter % plot_every == 0:
+        #     plot_loss_avg = plot_loss_total / plot_every
+        #     plot_losses.append(plot_loss_avg)
+        #     plot_loss_total = 0
+
+    # showPlot(plot_losses)
 
 
 

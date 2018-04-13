@@ -2,10 +2,10 @@ import math
 import torch as t
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.nn.init import xavier_normal
+from torch.nn.init import xavier_uniform
 from torch.nn.parameter import Parameter
 
-
+use_cuda = t.cuda.is_available()
 class RAN(nn.Module):
     def __init__(self, input_size, hidden_size, history_size, drop_rate):
         super(RAN, self).__init__()
@@ -22,34 +22,52 @@ class RAN(nn.Module):
         self.linear_sigma = nn.Linear(in_features=hidden_size,
                                 out_features=input_size,
                                 bias=False)
-        self.softmax = nn.Softmax()  # for batch training, need dim info.
-        self.drop = nn.Dropout(drop_rate)
+        self.softmax = nn.Softmax(dim=-1)  # for batch training, need dim info.
+        # self.drop = nn.Dropout(drop_rate)
+        self.init_weight()
 
     def encode(self, x):
         return self.linear(self.gru(x))
 
-    def init_hidden(self):
-        result = Variable(t.zeros(1, 1, self.hidden_size))
-        # if use_cuda:
-        #     return result.cuda()
-        # else:
-        #     return result
-        return result
+    def init_hidden(self, batch_size):
+        result = Variable(t.zeros(1, batch_size, self.hidden_size))
+        if use_cuda:
+            return result.cuda()
+        else:
+            return result
 
     def init_weight(self):
-        pass
+        xavier_uniform(self.linear_alpha.weight.data)
+        xavier_uniform(self.linear_sigma.weight.data)
 
 
 
     def forward(self, x, hidden, external):
         # RNNdropout is not implemented
-        _, hidden = self.gru(x, hidden)
-        alpha = self.softmax(self.linear_alpha(hidden))
-        sigma = t.exp(self.linear_sigma(hidden))
-        mu = alpha @ external
+        # x (seq_len, batch, input_size)
+        # hidden (1, batch, hidden_size)
+        # output (seq_len, batch, hidden_size)
+        # h_n (1, batch, hidden_size)
+        # external (seq_len, batch, history, feature)
+        # return (
+
+
+        # x (20, 64, 4)
+        # hidden (1, 64, 32)
+        # external (10, 4)
+        # output (20, 64, 32)
+        output, _ = self.gru(x, hidden)
+        a = self.linear_alpha(hidden)  # (1, 64, 10)
+        alpha = self.softmax(a)  # (1, 64, 10)
+        sigma_hat = self.linear_sigma(hidden)  # (1, 64, 4)
+        if self.training:
+            pass
+        mu = t.matmul(external, alpha.transpose(0, -1))
         prob = log_prob(x, mu, t.diag(sigma))
 
         return prob
+
+
 
 def log_prob(value, mu, cov):
     diff = value - mu
