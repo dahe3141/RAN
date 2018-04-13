@@ -257,9 +257,10 @@ def get_batch(samples, n_traj=64, n_frame=20):
     return ret[:, :, 2:6], ret[:, :, 0:2]
 
 
-def generate_external(traj):
+def generate_external(traj, hist_size):
     """
-
+    generate external memory for training. the first (hist_size) frames are
+    padded with zeros.
     Args:
         traj(np.array (n_fram, n_traj, n_feature)):
 
@@ -267,9 +268,17 @@ def generate_external(traj):
         external(np.array (n_fram, n_traj, hist_size, n_feature))
 
     """
-    traj = traj[:, :, None, :]
-    for i in range(traj.shape[0]):
-        pass
-    pass
+    n_frame, n_batch, n_feature = traj.shape
+    traj = np.rollaxis(traj, 0, 3)  # (64, 4, 20)
+    ret = np.empty((0, n_batch, n_feature, hist_size), dtype=np.float32)
+    for i in range(n_frame):
+        curr = np.zeros((1, n_batch, n_feature, hist_size), dtype=np.float32)
+        if i < hist_size:
+            curr[:, :, :, list(range(i+1))] = traj[None, :, :, list(range(i+1))]
+        else:
+            curr = traj[None, :, :, i-hist_size:i]
+        ret = np.concatenate((ret, curr), axis=0)
+
+    return ret
 
 

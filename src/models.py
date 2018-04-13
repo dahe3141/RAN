@@ -54,17 +54,21 @@ class RAN(nn.Module):
 
         # x (20, 64, 4)
         # hidden (1, 64, 32)
-        # external (10, 4)
+        # external [20, 64, 10, 4]
         # output (20, 64, 32)
         output, _ = self.gru(x, hidden)
         a = self.linear_alpha(hidden)  # (1, 64, 10)
         alpha = self.softmax(a)  # (1, 64, 10)
-        sigma_hat = self.linear_sigma(hidden)  # (1, 64, 4)
+        sigma = t.exp(self.linear_sigma(hidden))  # (1, 64, 4)
         if self.training:
-            pass
-        mu = t.matmul(external, alpha.transpose(0, -1))
-        prob = log_prob(x, mu, t.diag(sigma))
-
+            mu = t.matmul(external, alpha.permute([1, 2, 0]).data).squeeze() # (20, 64, 4, 1)
+        else:
+            raise NotImplementedError
+        diff = t.pow(x.data - mu, 2)
+        M = t.matmul(diff.unsqueeze(2), sigma.data.unsqueeze(-1))
+        # prob = log_prob(x, mu, t.diag(sigma))
+        # need to normalize
+        prob = M
         return prob
 
 
