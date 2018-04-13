@@ -1,6 +1,6 @@
 import argparse
 import os
-from utils import load_mot16_train, generate_training_samples, get_batch
+from utils import load_mot16_gt, load_mot16_det, generate_training_samples, get_batch
 from train import loss_fn, train
 from models import RAN
 from torch.optim import Adam
@@ -28,7 +28,7 @@ def main(args):
     #     print('not implemented')
     #     exit()
 
-    mot17_root_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "MOT16"))
+    mot16_root_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "MOT16"))
 
     m = RAN(input_size=4,
             hidden_size=32,
@@ -41,16 +41,17 @@ def main(args):
     criterion = loss_fn
 
     # load training data =================================================================
-    saved_path = os.path.join(mot17_root_dir, 'train_samples')
+    saved_path = os.path.join(mot16_root_dir, 'train_samples')
     if os.path.exists(saved_path):
         with open(saved_path, 'rb') as f:
-            train_samples = pickle.load(f)
+            train_samples, mot_train_seq = pickle.load(f)
     else:
-        det, gt, mot_train_seq = load_mot16_train(mot17_root_dir)
+        gt, mot_train_seq = load_mot16_gt(mot16_root_dir)
+        det = load_mot16_det(mot16_root_dir, mot_train_seq)
         train_samples = generate_training_samples(det, gt, mot_train_seq)
 
         with open(saved_path, 'wb+') as f:
-            pickle.dump(train_samples, f)
+            pickle.dump((train_samples, mot_train_seq), f)
 
     # a = get_batch(train_samples)
     train(m, loss_fn, train_samples)

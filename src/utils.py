@@ -3,25 +3,18 @@ import os
 import csv
 
 
-def load_mot16_train(data_root):
-    """Parse MOT16 training data
-
+def load_mot16_gt(data_root):
+    """Parse MOT16 ground truth data
     Args:
         data_root (str): path MOT16 folder
 
     Returns:
-        det (list): list of detections. One structured np array for each video.
-            one detection per row. [frame_num | x, y, w, h | score]
         gt (list): list of trajectories. One np array for each video.
             One frame per row. [frame_num \ track_id \ x, y, w, h \ class \ vis]
         mot_train_seq (list): video names as indexed by vid_id - 1
 
     expecting files in the following format:
-    for ground truth:
         <frame_num>,<track_id>,<x>,<y>,<w>,<h>,<conf>,<class>,<vis>
-    for detection:
-        <frame_num>,<-1>,<x>,<y>,<w>,<h>,<conf>,<-1>,<-1>,<-1>
-
     Note:
         The x,y coord returned for bbox is the center pixel location.
     """
@@ -50,6 +43,25 @@ def load_mot16_train(data_root):
         raw_gt = _remove_field_name(raw_gt, ['conf'])
         gt.append(raw_gt)
 
+    return gt, mot_train_seq
+
+
+def load_mot16_det(data_root, mot_train_seq):
+    """Parse MOT16 detection data
+    Args:
+        data_root (str): path MOT16 folder
+        mot_train_seq (list): list of video files. This is used to process video
+            in the same order as ground truth
+    Returns:
+        det (list): list of detections. One structured np array for each video.
+            one detection per row. [frame_num | x, y, w, h | score]
+
+    expecting files in the following format:
+        <frame_num>,<-1>,<x>,<y>,<w>,<h>,<conf>,<-1>,<-1>,<-1>
+
+    Note:
+        The x,y coord returned for bbox is the center pixel location.
+    """
     mot_train_seq_det_fn = [os.path.join(data_root, 'train', seq, 'det',
                                  'det.txt') for seq in mot_train_seq]
     det = []
@@ -73,7 +85,7 @@ def load_mot16_train(data_root):
         # raw_det = np.append([[i + 1]] * raw_det.shape[0],
         #                     raw_det, axis=1)
         det.append(raw_det)
-    return det, gt, mot_train_seq
+    return det
 
 
 def _remove_field_name(a, name):
@@ -90,10 +102,12 @@ def iou(gt_bbox, det_bboxs):
     """compute IOU between groud truth bbox and detected bboxes
 
     Args:
-        gt_bbox (numpy.array, (4,)): bounding box in format center x, y, w, h
-        det_bboxs (numpy.array, (4,n)): bboxes in detection in the same format.
+        gt_bbox (numpy.void, (4,)): bounding box in format center x, y, w, h
+        det_bboxs (structured numpy.array, (4,n)):
+            bboxes in detection in the same format.
     Returns:
-        bbox_sel (np array): randomly selected bbox with iou larger than 0.5. Or empty array if non valid bbox exist.
+        candidate bboxs (np array (n, 4)): all candidate bboxs with iou larger
+            than 0.5. Or empty array if non valid bbox exist.
     """
 
     # input are some structured array. Convert to regular ndarray
@@ -130,23 +144,40 @@ def iou(gt_bbox, det_bboxs):
         return np.empty((0, 4), dtype=np.float32)
 
     iou_idx = np.where(overlap_mask)[0][iou_mask]
-    bbox_sel = det_bboxs[np.random.permutation(iou_idx)[0], :]
 
-    return bbox_sel
+    return det_bboxs[iou_idx]
+
+
+def uniform_sample_bbox(bboxs):
+    """ Select a bbox from input bboxs. Return an empty array if bboxs is empty.
+
+    Args:
+        bboxs (numpy array): (n, 4) where n can be 0
+
+    Returns:
+        bbox_sel (numpy array): (1, 4)
+
+    """
+    if bboxs.shape[0] == 0:
+        return bboxs
+    else:
+        return bboxs[np.random.choice(bboxs.shape[0]), :]
 
 
 def generate_training_samples(det_all, gt_all, mot_train_seq, min_len=20):
-    """Generate training trajectory for a video
+    """Generate training trajectories for all videos
 
     Args:
-        det (list): list of detections for each frame. Indexed by zero-based frame number.
-            Represented with np array: one detection per row. [bbox, score]
+        det (list): list of detections for each frame. Indexed by frame number.
+            each frame is represented with np array: one detection per row.
+            (n, 5) [bbox, score]
         gt (list): list of trajectories. It is not indexed by the trajectory id.
-            One frame per row. [frame_num, track_id, x, y, w, h]
+            each trajectory is represented by a np array.
+            (n, 6) [frame_num, track_id, x, y, w, h]
 
     Return:
         training_trajs (list): a list of generated training trajectories.
-            indexed by video first then tracks. Each track is represented by a ndarray of (n, 5) [vid_num frame_num bbox]
+            Each track is represented by a ndarray of (n, 6) [vid_num frame_num bbox]
 
     """
     # for each vid:
@@ -154,7 +185,8 @@ def generate_training_samples(det_all, gt_all, mot_train_seq, min_len=20):
     #         for each frame in traj:
     #             sample a det
 
-    # note, here we can run Hungarian method for min assignment cost (IOU).
+    # note, here we can run Hungarian method for min assignment cost (IOU)
+    # between all detections and all ground truth in a frame.
     c = []
     train_samples = []
     for i, gt, det in zip(range(len(gt_all)), gt_all, det_all):
@@ -170,9 +202,11 @@ def generate_training_samples(det_all, gt_all, mot_train_seq, min_len=20):
                 # There are frames without any detection
                 if not np.any(det_mask):
                     cc += 1
-                    continue
-                det_bboxs = det[det_mask][['x', 'y', 'w', 'h']]  # all bbox in frame
-                bbox_sel = iou(gt_bbox, det_bboxs)
+                    bbox_sel = np.array(gt_bbox.tolist())
+                else:
+                    det_bboxs = det[det_mask][['x', 'y', 'w', 'h']]  # all bbox in frame
+                    bbox_candidates = iou(gt_bbox, det_bboxs)
+                    bbox_sel = uniform_sample_bbox(bbox_candidates)
                 # no detected bbox can be associated to gt
                 if len(bbox_sel) == 0:
                     bbox_sel = np.array(gt_bbox.tolist())
@@ -197,13 +231,19 @@ def generate_training_samples(det_all, gt_all, mot_train_seq, min_len=20):
 
 def get_batch(samples, n_traj=64, n_frame=20):
     """
-    return a (10, 64, 4) matrix, (n_traj, n_frame, bbox)
+    return a (10, 64, 4) matrix, (n_frame, n_traj, bbox)
         and a (10, 64, 2) matrix for vid and frame indexing (to generate filename)
+        This method need to be fixed. It generate sample with replacement.
 
-    :param samples:
-    :param n_traj:
-    :param n_frame:
-    :return:
+    Args:
+        samples(list[traj]): return value from generate_training_samples()
+        n_traj: number of traj for training batch (batch number)
+        n_frame: number of time step.
+
+    Returns:
+        training_sample(np.array (n_frame, n_traj, feature_size)):
+        idx_vid_frame (np.array (n_frame, n_traj, 2)): the last dimension contain
+            video and frame number.
     """
     idx = np.random.choice(len(samples), size=n_traj)
     trajs = [samples[i] for i in idx]
@@ -213,6 +253,7 @@ def get_batch(samples, n_traj=64, n_frame=20):
         sel = t[i:i + n_frame, :]
         ret = np.concatenate((ret, sel[None, :, :]))
     ret = np.swapaxes(ret, 0, 1)
+
     return ret[:, :, 2:6], ret[:, :, 0:2]
 
 
