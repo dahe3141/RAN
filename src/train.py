@@ -4,11 +4,23 @@ from utils import get_batch, generate_external
 from torch.autograd import Variable
 import time
 from torch import optim
+import math
 
 use_cuda = t.cuda.is_available()
 
-def loss_fn(x):
-    return -t.cumsum(x, dim=0)
+def loss_fn(alpha, sigma,x, external, n):
+    mu = t.matmul(external,  # (20, 64, 4, 10) * (20, 64, 10, 1) = (20, 64, 4, 1)
+                  alpha.permute([1, 2, 0])).squeeze()
+    diff = t.pow(x - mu, 2)
+    M = t.matmul(diff.unsqueeze(2),
+                 1 / sigma.unsqueeze(-1)).squeeze()  # (20, 64)
+    M = t.sum(M)  # Mahalanobis distance
+    log_det = t.prod(sigma, dim=-1).abs().log().sum()
+    c = n * math.log(2 * math.pi)
+    # mu.size(-1) * math.log(2 * math.pi))
+    # prob = log_prob(x, mu, t.diag(sigma))
+    # need to normalize
+    return 0.5 * (log_det + M + c)
 
 def train(model, optimizer, traj, n_frame, batch_size):
     """In progress"""
@@ -22,16 +34,18 @@ def train(model, optimizer, traj, n_frame, batch_size):
         # external = t.zeros(model.history_size, 4)
         external = generate_external(traj, model.history_size)
         external = Variable(t.from_numpy(external.astype(np.float32)))
+
         if use_cuda: external = external.cuda()
         x = Variable(t.from_numpy(traj.astype(np.float32)), requires_grad=False)
         if use_cuda: x = x.cuda()
-        output, hidden = model(x, hidden, external)
-        loss += output
-        loss = criterion()
+
+        alpha, sigma = model(x, hidden)
+        loss += loss_fn(alpha, sigma, x, external,
+                        n_frame * batch_size * model.input_size)
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        t.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+        # t.nn.utils.clip_grad_norm(model.parameters(), args.clip)
 
         total_loss += loss.data
 
