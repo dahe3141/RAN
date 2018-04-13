@@ -21,7 +21,7 @@ def train(model, optimizer, traj, n_frame, batch_size):
         loss = 0
         # external = t.zeros(model.history_size, 4)
         external = generate_external(traj, model.history_size)
-        external = t.from_numpy(external.astype(np.float32))
+        external = Variable(t.from_numpy(external.astype(np.float32)))
         if use_cuda: external = external.cuda()
         x = Variable(t.from_numpy(traj.astype(np.float32)), requires_grad=False)
         if use_cuda: x = x.cuda()

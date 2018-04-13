@@ -61,11 +61,17 @@ class RAN(nn.Module):
         alpha = self.softmax(a)  # (1, 64, 10)
         sigma = t.exp(self.linear_sigma(hidden))  # (1, 64, 4)
         if self.training:
-            mu = t.matmul(external, alpha.permute([1, 2, 0]).data).squeeze() # (20, 64, 4, 1)
+            mu = t.matmul(external,
+                          alpha.permute([1, 2, 0])).squeeze() # (20, 64, 4, 1)
         else:
             raise NotImplementedError
-        diff = t.pow(x.data - mu, 2)
-        M = t.matmul(diff.unsqueeze(2), sigma.data.unsqueeze(-1))
+        diff = t.pow(x - mu, 2)
+        M = t.matmul(diff.unsqueeze(2),
+                     1 / sigma.unsqueeze(-1)).squeeze()  # (20, 64)
+        M = 0.5 * t.sum(M)
+        log_det = t.prod(sigma, dim=-1).abs().log().sum()
+        c = math.log(2 * math.pi)
+        # mu.size(-1) * math.log(2 * math.pi))
         # prob = log_prob(x, mu, t.diag(sigma))
         # need to normalize
         prob = M
