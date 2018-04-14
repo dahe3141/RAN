@@ -9,6 +9,18 @@ import math
 use_cuda = t.cuda.is_available()
 
 def loss_fn(alpha, sigma,x, external, n):
+    """
+    compute negative log likelihood probability of new observation x
+    Args:
+        alpha: (1, batch, history) (1, 64, 10)
+        sigma: (1, batch, feature) (1, 64, 4)
+        x: (seq_len, batch, input_size) (20, 64, 4)
+        external: (seq_len, batch, feature, history) (20, 64, 4, 10)
+        n: (n_frame * batch_size * feature_size) used to compute the constant c
+
+    Returns:
+        negative log likelihood of oberservation. scalar tensor.
+    """
     mu = t.matmul(external,  # (20, 64, 4, 10) * (20, 64, 10, 1) = (20, 64, 4, 1)
                   alpha.permute([1, 2, 0])).squeeze()
     diff = t.pow(x - mu, 2)
@@ -25,29 +37,25 @@ def loss_fn(alpha, sigma,x, external, n):
 def train(model, optimizer, traj, n_frame, batch_size):
     """In progress"""
     model.train()
-    total_loss = 0
-    # init hidden currently in
-    hidden = model.init_hidden(batch_size) # (1, 1, 32)
-    for i in range(1):
-        optimizer.zero_grad()
-        loss = 0
-        # external = t.zeros(model.history_size, 4)
-        external = generate_external(traj, model.history_size)
-        external = Variable(t.from_numpy(external.astype(np.float32)))
+    optimizer.zero_grad()
+    hidden = model.init_hidden(batch_size)  # (1, 1, 32)
+    # external = t.zeros(model.history_size, 4)
+    external = generate_external(traj, model.history_size)
+    external = Variable(t.from_numpy(external.astype(np.float32)))
 
-        if use_cuda: external = external.cuda()
-        x = Variable(t.from_numpy(traj.astype(np.float32)), requires_grad=False)
-        if use_cuda: x = x.cuda()
+    if use_cuda: external = external.cuda()
+    x = Variable(t.from_numpy(traj.astype(np.float32)), requires_grad=False)
+    if use_cuda: x = x.cuda()
 
-        alpha, sigma = model(x, hidden)
-        loss += loss_fn(alpha, sigma, x, external,
-                        n_frame * batch_size * model.input_size)
-        loss.backward()
+    alpha, sigma, h_n = model(x, hidden)
+    loss = loss_fn(alpha, sigma, x, external,
+                    n_frame * batch_size * model.input_size)
+    loss.backward()
+    optimizer.step()
+    # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
+    # t.nn.utils.clip_grad_norm(model.parameters(), args.clip)
 
-        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        # t.nn.utils.clip_grad_norm(model.parameters(), args.clip)
-
-        total_loss += loss.data
+    return loss, h_n
 
         # if batch % args.log_interval == 0 and batch > 0:
         #     cur_loss = total_loss[0] / args.log_interval
@@ -68,20 +76,20 @@ def trainIters(model, samples, n_iters, n_frame=20, batch_size=64, lr=0.001,
     # plot_losses = []
     # print_loss_total = 0  # Reset every print_every
     # plot_loss_total = 0  # Reset every plot_every
-
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas, eps=eps)
 
     # training_pairs = [variablesFromPair(random.choice(pairs))
     #                   for i in range(n_iters)]
     # criterion = nn.NLLLoss()
-
+    total_loss = []
     for iter in range(1, n_iters + 1):
 
         traj, idx = get_batch(samples, n_traj=batch_size, n_frame=n_frame)
         # loss = train(input_variable, target_variable, encoder,
         #              decoder, encoder_optimizer, decoder_optimizer, criterion)
 
-        train(model, optimizer, traj, n_frame, batch_size)
+        loss, hidden = train(model, optimizer, traj, n_frame, batch_size)
+        total_loss += list(loss.data)
         # print_loss_total += loss
         # plot_loss_total += loss
         #
@@ -95,7 +103,7 @@ def trainIters(model, samples, n_iters, n_frame=20, batch_size=64, lr=0.001,
         #     plot_loss_avg = plot_loss_total / plot_every
         #     plot_losses.append(plot_loss_avg)
         #     plot_loss_total = 0
-
+    print(total_loss)
     # showPlot(plot_losses)
 
 

@@ -43,7 +43,6 @@ class RAN(nn.Module):
         Args:
             x: (seq_len, batch, input_size) (20, 64, 4)
             hidden: (1, batch, hidden_size) (1, 64, 32)
-            external: (seq_len, batch, feature, history) (20, 64, 4, 10)
 
         Returns:
             alpha: (1, batch, history) (1, 64, 10)
@@ -53,11 +52,11 @@ class RAN(nn.Module):
         # output (seq_len, batch, hidden_size)
         # h_n (1, batch, hidden_size)
 
-        output, _ = self.gru(x, hidden)  # output (20, 64, 32)
+        output, h_n = self.gru(x, hidden)  # output (20, 64, 32)
         a = self.linear_alpha(hidden)  # (1, 64, 10)
         alpha = self.softmax(a)  # (1, 64, 10)
         sigma = t.exp(self.linear_sigma(hidden))  # (1, 64, 4)
-        return alpha, sigma
+        return alpha, sigma, h_n
 
 
 

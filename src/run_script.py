@@ -52,7 +52,7 @@ def main(args):
             drop_rate=0.5)
 
 
-    trainIters(m, train_samples, n_iters=1)
+    trainIters(m, train_samples, n_iters=5)
 
 
 
