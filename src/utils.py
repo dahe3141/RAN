@@ -19,6 +19,7 @@ def load_mot16_gt(data_root):
         The x,y coord returned for bbox is the center pixel location.
     """
     mot_train_seq = os.listdir(os.path.join(data_root, 'train'))
+    mot_train_seq = [f for f in mot_train_seq if not f.startswith('.')]
     mot_train_seq_gt_fn = [os.path.join(data_root, 'train', seq, 'gt',
                                     'gt.txt') for seq in mot_train_seq]
     gt = []
@@ -92,10 +93,10 @@ def _remove_field_name(a, name):
     names = [n for n in list(a.dtype.names) if not (n in name)]
     return a[names]
 
+
 def _print_train_sample_len(train_samples, mot_train_seq):
     for name, vid in zip(mot_train_seq, train_samples):
         print(name, [len(a) for a in vid])
-
 
 
 def iou(gt_bbox, det_bboxs):

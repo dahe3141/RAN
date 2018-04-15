@@ -39,7 +39,7 @@ def train(model, optimizer, traj, n_frame, batch_size):
     model.train()
     optimizer.zero_grad()
     hidden = model.init_hidden(batch_size)  # (1, 1, 32)
-    # external = t.zeros(model.history_size, 4)
+     # external = t.zeros(model.history_size, 4)
     external = generate_external(traj, model.history_size)
     external = Variable(t.from_numpy(external.astype(np.float32)))
 
