@@ -1,2 +1,4 @@
 Data/
 res/
+.idea/
+src/__pycache__

@@ -45,44 +45,17 @@ class RAN(nn.Module):
             hidden: (1, batch, hidden_size) (1, 64, 32)
 
         Returns:
-            alpha: (1, batch, history) (1, 64, 10)
-            sigma: (1, batch, feature) (1, 64, 4)
+            alpha: (seq_len, batch, history) (1, 64, 10)
+            sigma: (seq_len, batch, feature) (1, 64, 4)
         """
         # RNNdropout is not implemented
         # output (seq_len, batch, hidden_size)
         # h_n (1, batch, hidden_size)
 
         output, h_n = self.gru(x, hidden)  # output (20, 64, 32)
-        a = self.linear_alpha(hidden)  # (1, 64, 10)
+        a = self.linear_alpha(output)  # (1, 64, 10)
         alpha = self.softmax(a)  # (1, 64, 10)
-        sigma = t.exp(self.linear_sigma(hidden))  # (1, 64, 4)
+        sigma = t.exp(self.linear_sigma(output))  # (1, 64, 4)
         return alpha, sigma, h_n
 
-
-
-
-def log_prob(value, mu, cov):
-    diff = value - mu
-    M = _batch_mahalanobis(cov, diff)
-    log_det = _batch_diag(cov).abs().log().sum(-1)
-    return -0.5 * (M + mu.size(-1) * math.log(2 * math.pi)) - log_det
-
-
-def _batch_mahalanobis(L, x):
-    r"""
-    Computes the squared Mahalanobis distance :math:`\mathbf{x}^\top\mathbf{M}^{-1}\mathbf{x}`
-    for a factored :math:`\mathbf{M} = \mathbf{L}\mathbf{L}^\top`.
-
-    Accepts batches for both L and x.
-    """
-    # TODO: use `torch.potrs` or similar once a backwards pass is implemented.
-    flat_L = L.unsqueeze(0).reshape((-1,) + L.shape[-2:])
-    L_inv = t.stack([t.inverse(Li.t()) for Li in flat_L]).view(L.shape)
-    return (x.unsqueeze(-1) * L_inv).sum(-2).pow(2.0).sum(-1)
-
-def _batch_diag(bmat):
-    r"""
-    Returns the diagonals of a batch of square matrices.
-    """
-    return bmat.reshape(bmat.shape[:-2] + (-1,))[..., ::bmat.size(-1) + 1]
 
