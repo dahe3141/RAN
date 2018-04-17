@@ -11,6 +11,7 @@ import progressbar
 
 use_cuda = t.cuda.is_available()
 
+
 def loss_fn(alpha, sigma, x, ext, lengths):
     """
     compute negative log likelihood probability of new observation x
@@ -55,7 +56,6 @@ def trainIters(model, dataloader, n_epoch, lr=0.001, betas=(0.9, 0.99), eps=1e-8
     bar = progressbar.ProgressBar(widgets=widgets, max_value=n_epoch)
     for e in bar(range(n_epoch)):
 
-
         for sample in dataloader:
             i += 1
             model.train()
@@ -73,8 +73,6 @@ def trainIters(model, dataloader, n_epoch, lr=0.001, betas=(0.9, 0.99), eps=1e-8
             # support will be added for pytorch 0.4
             if use_cuda: packed_batch = PackedSequence(packed_batch.data.cuda(),
                                                        packed_batch.batch_sizes)
-
-
 
             hidden = model.init_hidden(len(lengths))  # (1, B, hidden)
 

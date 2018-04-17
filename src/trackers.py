@@ -13,6 +13,9 @@ class RANTrack(object):
         self.feature = feature
         self.track_id = track_id
 
+        self.time_since_update = 0
+        self.age = 0
+
         # RNN state vectors
         self.h_bbox = 0
         self.h_feature = 0
@@ -37,6 +40,7 @@ class RANTrack(object):
         self.feature = feature
 
     def predict(self, model):
+        self.time_since_update += 1
         bbox = Variable(torch.from_numpy(self.bbox)).cuda()
 
         # obtain h, alpha, sigma using RAN
@@ -61,13 +65,8 @@ class RANTracker(object):
     def __init__(self, max_age=30, mem_size=10):
         self.max_age = max_age
 
-
-
         self.tracks = []
         self._next_id = 1
-
-    def linear_combination(self):
-        return np.matmul(self.alpha_bbox, np.array(self.externel_bbox))
 
     def predict(self, model):
         """Update alpha, sigma, and hidden states for all the tracks
@@ -88,6 +87,36 @@ class RANTracker(object):
     def _init_track(self, bbox, feature=None):
         self.tracks.append(RANTrack(bbox, self._next_id, feature))
         self._next_id += 1
+
+    def _match(self, detections, features):
+        if len(self.tracks) == 0:
+            return np.empty((0, 2), dtype=int), np.arange(len(detections)), np.empty((0, 4))
+
+        sim_matrix = np.zeros((len(detections), len(self.tracks)), dtype=np.float32)
+
+        for d, det in detections:
+            for t, trk in self.tracks:
+                sim_matrix[d, t] = trk.similarity(det)
+
+        matched_indices = linear_assignment(-sim_matrix)
+
+        matches, unmatched_tracks, unmatched_detections = [], [], []
+
+        for d, _ in enumerate(detections):
+            if d not in matched_indices[:, 0]:
+                unmatched_detections.append(d)
+
+        for t, _ in enumerate(self.tracks):
+            if t not in matched_indices[:, 1]:
+                unmatched_tracks.append(t)
+
+        for d, t in matched_indices:
+            if sim_matrix[d, t] < min_similarity:
+                unmatched_tracks.append(t)
+                unmatched_detections.append(d)
+            else:
+                matches.append((d, t))
+        return matches, unmatched_tracks, unmatched_detections
 
 
 
