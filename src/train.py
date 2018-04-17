@@ -1,13 +1,13 @@
 import numpy as np
 import torch as t
-from utils import get_batch, generate_external
+from utils import generate_external
 from torch.autograd import Variable
 import time
 from torch import optim
 import math
 from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence
 import matplotlib.pyplot as plt
-
+import progressbar
 
 use_cuda = t.cuda.is_available()
 
@@ -24,6 +24,13 @@ def loss_fn(alpha, sigma, x, ext, lengths):
     Returns:
         negative log likelihood of oberservation. scalar tensor.
     """
+    H = alpha.data.shape[-1]  # history
+    S = lengths[-1]  # shortest
+    assert (alpha.data[S, -1, :] == 1/ H).prod() == 1
+    assert (sigma.data[S, -1, :] == 1).prod() == 1
+    assert x.data[S, -1, :].sum() == 0
+    assert ext.data[S, -1, :, :].sum() == 0
+
     mu = t.matmul(ext, alpha.unsqueeze(-1)).squeeze()
     diff = t.pow(x - mu, 2)
     M = t.matmul(diff.unsqueeze(2),
@@ -42,7 +49,12 @@ def trainIters(model, dataloader, n_epoch, lr=0.001, betas=(0.9, 0.99), eps=1e-8
 
     total_loss = []
     i=0
-    for e in range(n_epoch):
+    # progressbar setting
+    widgets = ['Training epoch ', progressbar.Counter(), progressbar.Percentage(),
+               ' ', progressbar.Bar(), ' ', progressbar.ETA()]
+    bar = progressbar.ProgressBar(widgets=widgets, max_value=n_epoch)
+    for e in bar(range(n_epoch)):
+
 
         for sample in dataloader:
             i += 1
@@ -76,11 +88,10 @@ def trainIters(model, dataloader, n_epoch, lr=0.001, betas=(0.9, 0.99), eps=1e-8
             optimizer.step()
 
             total_loss += list(loss.data)
-    print(i)
-    print(total_loss)
+    print(i, ' iterations')
+    print('min loss ', np.array(total_loss).min())
     plt.plot(total_loss)
     plt.ylabel('some numbers')
     plt.show()
-
 
 
