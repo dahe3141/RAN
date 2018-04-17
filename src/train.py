@@ -19,17 +19,17 @@ def loss_fn(alpha, sigma, x, ext, lengths):
         sigma (Variable): (T, B, F) padded with 1
         x (Variable): (T, B, F) padded with 0
         external (Variable): (seq_len, batch, feature, history) (20, 64, 4, 10)
-        lengths (list): a list of seq_len, one for each traj
-
+        lengths (list): a list of seq_len, one for each traj. Can be a list of
+            ones whith size of the batch during testing.
     Returns:
         negative log likelihood of oberservation. scalar tensor.
     """
-    H = alpha.data.shape[-1]  # history
-    S = lengths[-1]  # shortest
-    assert (alpha.data[S, -1, :] == 1/ H).prod() == 1
-    assert (sigma.data[S, -1, :] == 1).prod() == 1
-    assert x.data[S, -1, :].sum() == 0
-    assert ext.data[S, -1, :, :].sum() == 0
+    # H = alpha.data.shape[-1]  # history
+    # S = lengths[-1]  # shortest
+    # assert (alpha.data[S, -1, :] == 1/ H).prod() == 1
+    # assert (sigma.data[S, -1, :] == 1).prod() == 1
+    # assert x.data[S, -1, :].sum() == 0
+    # assert ext.data[S, -1, :, :].sum() == 0
 
     mu = t.matmul(ext, alpha.unsqueeze(-1)).squeeze()
     diff = t.pow(x - mu, 2)

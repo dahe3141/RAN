@@ -3,7 +3,7 @@ import torch as t
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.nn.init import xavier_uniform
-from torch.nn.utils.rnn import pad_packed_sequence
+from torch.nn.utils.rnn import pad_packed_sequence, PackedSequence
 from torch.nn.parameter import Parameter
 
 use_cuda = t.cuda.is_available()
@@ -46,7 +46,7 @@ class RAN(nn.Module):
         F is feature size
         H is history size
         Args:
-            x (PackedSequence): (T, B, F) (20, 64, 4)
+            x (PackedSequence or Variable): (T, B, F) (20, 64, 4)
             hidden (Variable): (1, B, hidden_size) (1, 64, 32)
 
         Returns:
@@ -58,10 +58,11 @@ class RAN(nn.Module):
 
         output, h_n = self.gru(x, hidden)  # output (20, 64, 32)
         # unpack output and pad with zeros
-        output_padded, lengths = pad_packed_sequence(output)
+        if isinstance(output, PackedSequence):
+            output, _ = pad_packed_sequence(output)
 
-        alpha = self.softmax(self.linear_alpha(output_padded))  # (T, 64, 10)
-        sigma = t.exp(self.linear_sigma(output_padded))  # (T, 64, 4)
+        alpha = self.softmax(self.linear_alpha(output))  # (T, 64, 10)
+        sigma = t.exp(self.linear_sigma(output))  # (T, 64, 4)
         # trim off padding
         # alpha = [alpha[0:l, i, :] for i, l in enumerate(lengths)]
         # sigma = [sigma[0:l, i, :] for i, l in enumerate(lengths)]
