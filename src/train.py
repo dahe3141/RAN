@@ -5,67 +5,82 @@ from torch.autograd import Variable
 import time
 from torch import optim
 import math
+from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence
+import matplotlib.pyplot as plt
+
 
 use_cuda = t.cuda.is_available()
 
-def loss_fn(alpha, sigma,x, external, n):
+def loss_fn(alpha, sigma, x, ext, lengths):
     """
     compute negative log likelihood probability of new observation x
     Args:
-        alpha: (seq_len, batch, history) (20, 64, 10)
-        sigma: (seq_len, batch, feature) (20, 64, 4)
-        x: (seq_len, batch, feature) (20, 64, 4)
-        external: (seq_len, batch, feature, history) (20, 64, 4, 10)
-        n: (n_frame * batch_size * feature_size) used to compute the constant c
+        alpha (Variable): (T, B, H) padded with 1/H
+        sigma (Variable): (T, B, F) padded with 1
+        x (Variable): (T, B, F) padded with 0
+        external (Variable): (seq_len, batch, feature, history) (20, 64, 4, 10)
+        lengths (list): a list of seq_len, one for each traj
 
     Returns:
         negative log likelihood of oberservation. scalar tensor.
     """
-    mu = t.matmul(external,  # (20, 64, 4, 10) * (20, 64, 10, 1) = (20, 64, 4, 1)
-                  alpha.unsqueeze(-1)).squeeze()
+    mu = t.matmul(ext, alpha.unsqueeze(-1)).squeeze()
     diff = t.pow(x - mu, 2)
     M = t.matmul(diff.unsqueeze(2),
                  1 / sigma.unsqueeze(-1)).sum()  # Mahalanobis distance
     log_det = sigma.log().sum()
+    # sum over all sequence of all batch of all features
+    n = np.sum(np.array(lengths)) * x.shape[-1]
     c = n * math.log(2 * math.pi)
     # mu.size(-1) * math.log(2 * math.pi))
     return 0.5 * (log_det + M + c)
 
-def train(model, optimizer, traj, n_frame, batch_size):
-    """In progress"""
-    model.train()
-    optimizer.zero_grad()
-    hidden = model.init_hidden(batch_size)  # (1, 1, 32)
-    external = generate_external(traj, model.history_size)
-    external = Variable(t.from_numpy(external.astype(np.float32)))
 
-    if use_cuda: external = external.cuda()
-    x = Variable(t.from_numpy(traj.astype(np.float32)), requires_grad=False)
-    if use_cuda: x = x.cuda()
-
-    alpha, sigma, h_n = model(x, hidden)
-    loss = loss_fn(alpha, sigma, x, external,
-                    n_frame * batch_size * model.input_size)
-    loss.backward()
-    optimizer.step()
-
-    return loss, h_n
-
-
-def trainIters(model, samples, n_iters, n_frame=20, batch_size=64, lr=0.001,
-               betas=(0.9, 0.99), eps=1e-8):
-    if use_cuda:
-        model = model.cuda()
+def trainIters(model, dataloader, n_epoch, lr=0.001, betas=(0.9, 0.99), eps=1e-8):
+    if use_cuda: model = model.cuda()
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas, eps=eps)
 
     total_loss = []
-    for iter in range(1, n_iters + 1):
+    i=0
+    for e in range(n_epoch):
 
-        traj, idx = get_batch(samples, n_traj=batch_size, n_frame=n_frame)
-        loss, hidden = train(model, optimizer, traj, n_frame, batch_size)
-        total_loss += list(loss.data)
+        for sample in dataloader:
+            i += 1
+            model.train()
+            optimizer.zero_grad()
 
+            # unpack sample
+            packed_batch = sample  # PackedSequence
+
+            # pad batch to get lengths and generate external memory
+            padded_batch, lengths = pad_packed_sequence(packed_batch)
+            ext = generate_external(padded_batch.data.numpy(),
+                                    lengths, model.history_size)
+
+            # pytorch 0.31 does not support cuda() call for PackedSequence.
+            # support will be added for pytorch 0.4
+            if use_cuda: packed_batch = PackedSequence(packed_batch.data.cuda(),
+                                                       packed_batch.batch_sizes)
+
+
+
+            hidden = model.init_hidden(len(lengths))  # (1, B, hidden)
+
+            alpha, sigma, h_n = model(packed_batch, hidden)
+
+            ext = Variable(t.from_numpy(ext), requires_grad=False)
+            if use_cuda: ext, padded_batch = ext.cuda(), padded_batch.cuda()
+
+            loss = loss_fn(alpha, sigma, padded_batch, ext, lengths)
+            loss.backward()
+            optimizer.step()
+
+            total_loss += list(loss.data)
+    print(i)
     print(total_loss)
+    plt.plot(total_loss)
+    plt.ylabel('some numbers')
+    plt.show()
 
 
 

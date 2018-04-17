@@ -1,7 +1,5 @@
 import numpy as np
 import os
-import csv
-
 
 def load_mot16_gt(data_root):
     """Parse MOT16 ground truth data
@@ -149,38 +147,28 @@ def iou(gt_bbox, det_bboxs):
     return det_bboxs[iou_idx]
 
 
-def uniform_sample_bbox(bboxs):
-    """ Select a bbox from input bboxs. Return an empty array if bboxs is empty.
-
-    Args:
-        bboxs (numpy array): (n, 4) where n can be 0
-
-    Returns:
-        bbox_sel (numpy array): (1, 4)
-
-    """
-    if bboxs.shape[0] == 0:
-        return bboxs
-    else:
-        return bboxs[np.random.choice(bboxs.shape[0]), :]
-
-
-def generate_training_samples(det_all, gt_all, mot_train_seq, min_len=20):
+def generate_training_samples(det_all, gt_all, val_id=7, min_len=20):
     """Generate training trajectories for all videos
 
     Args:
-        det (list): list of detections for each frame. Indexed by frame number.
-            each frame is represented with np array: one detection per row.
-            (n, 5) [bbox, score]
-        gt (list): list of trajectories. It is not indexed by the trajectory id.
+        det (list): list of detections for each video.
+            each vid is represented with np array: one detection per row.
+            (n, 5) [frame_num, bbox, score]
+        gt (list): list of trajectories for each video.
             each trajectory is represented by a np array.
             (n, 6) [frame_num, track_id, x, y, w, h]
+        val_id (int): indicate which video is used for validation. one-indexing.
+            max is 7.
 
     Return:
-        training_trajs (list): a list of generated training trajectories.
-            Each track is represented by a ndarray of (n, 6) [vid_num frame_num bbox]
+        train_samples (list): a list of generated training trajectories.
+            Each traj is represented by a ndarray of (n, 4) [bbox]
+            Note: the bbox contain change in center pixel not the absolute location
+        img_id_samples (list): same as train_samples but contain image id info
+            Each track is represented by a ndarray of (n, 2) [vid_num frame_num]
 
     """
+    # currently 458 training trajectories
     # for each vid:
     #     for each traj in vid:
     #         for each frame in traj:
@@ -190,14 +178,16 @@ def generate_training_samples(det_all, gt_all, mot_train_seq, min_len=20):
     # between all detections and all ground truth in a frame.
     c = []
     train_samples = []
+    img_id_train_samples = []
     for i, gt, det in zip(range(len(gt_all)), gt_all, det_all):
         list_traj_id = np.unique(gt['track_id'])
-        vid_train = []
+        if i+1 == val_id:
+            continue
         cc = 0
         for t in list_traj_id:
             gt_traj = gt[gt['track_id'] == t]
-            traj_train = np.empty((0, 6))
-            for i, f in enumerate(gt_traj):
+            traj_train = np.empty((0, 4))
+            for f in gt_traj:
                 gt_bbox = f[['x', 'y', 'w', 'h']]
                 det_mask = det['frame_num'] == f['frame_num']
                 # There are frames without any detection
@@ -212,74 +202,121 @@ def generate_training_samples(det_all, gt_all, mot_train_seq, min_len=20):
                 if len(bbox_sel) == 0:
                     bbox_sel = np.array(gt_bbox.tolist())
 
-                traj_train = np.vstack((traj_train,
-                                    np.hstack((i+1, f[0], bbox_sel))))
-
+                traj_train = np.vstack((traj_train, bbox_sel))
+                                    # np.hstack((i+1, f[0], ))))
             if len(traj_train) >= min_len:
-                vid_train.append(traj_train)
+                # compute change in center pixel
+                traj_train[1:, 0:2] -= traj_train[0:-1, 0:2]
+                traj_train[0, 0:2] = 0
+                img_id = np.vstack(((i+1) * np.ones(gt_traj['frame_num'].shape),
+                                    gt_traj['frame_num'],)).astype(np.int)
+
+                train_samples.append(traj_train)
+                img_id_train_samples.append(img_id.transpose())
+
         c.append(cc)
-        train_samples.append(vid_train)
 
     # print(c)
     # a = np.array([11450, 17833, 6818, 47557, 12318, 9174, 5257])
     # print(c/a)
-    _print_train_sample_len(train_samples, mot_train_seq)
+    # _print_train_sample_len(train_samples, mot_train_seq)
 
     # Note: I decide to drop the vid index and mix all tracks
-    train_samples = [traj for vid in train_samples for traj in vid]
-    return train_samples
+    return train_samples, img_id_train_samples
 
 
-def get_batch(samples, n_traj=64, n_frame=20):
+def generate_external(padded_batch,  lengths, hist_size):
     """
-    return a (10, 64, 4) matrix, (n_frame, n_traj, bbox)
-        and a (10, 64, 2) matrix for vid and frame indexing (to generate filename)
-        This method need to be fixed. It generate sample with replacement.
-
+    Helper function for pad_packed_collate
+    generate external memory of the given a padded batch for training.
     Args:
-        samples(list[traj]): return value from generate_training_samples()
-        n_traj: number of traj for training batch (batch number)
-        n_frame: number of time step.
-
+        padded_batch(np.array (T, B, F)): T is maximum seq_len in batch.
+            B is batch size, F is feature size.
+        lengths (list): list of sequence length.
+        hist_size (int): external memory history size
     Returns:
-        training_sample(np.array (n_frame, n_traj, feature_size)):
-        idx_vid_frame (np.array (n_frame, n_traj, 2)): the last dimension contain
-            video and frame number.
-    """
-    idx = np.random.choice(len(samples), size=n_traj)
-    trajs = [samples[i] for i in idx]
-    ret = np.empty((0, n_frame, 6), dtype=np.float32)
-    for t in trajs:
-        i = np.random.choice(len(t) - n_frame + 1)
-        sel = t[i:i + n_frame, :]
-        ret = np.concatenate((ret, sel[None, :, :]))
-    ret = np.swapaxes(ret, 0, 1)
-
-    return ret[:, :, 2:6], ret[:, :, 0:2]
-
-
-def generate_external(traj, hist_size):
-    """
-    generate external memory for training. the first (hist_size) frames are
-    padded with zeros.
-    Args:
-        traj(np.array (n_fram, n_traj, n_feature)):
-
-    Returns:
-        external(np.array (n_fram, n_traj, hist_size, n_feature))
+        external(np.array (T, B, F, H)): padded external memory.
+            used to compute loss
 
     """
-    n_frame, n_batch, n_feature = traj.shape
-    traj = np.rollaxis(traj, 0, 3)  # (64, 4, 20)
-    ret = np.empty((0, n_batch, n_feature, hist_size), dtype=np.float32)
+    n_frame, n_batch, n_feature = padded_batch.shape
+    ext = np.zeros((n_frame, n_batch, n_feature, hist_size), dtype=np.float32)
+
+    # Get the batch into shape 1, B, F, T)
+    padded_batch = np.transpose(padded_batch, (1, 2, 0))[None, :, :, :]
+    lengths = np.array(lengths)
     for i in range(n_frame):
-        curr = np.zeros((1, n_batch, n_feature, hist_size), dtype=np.float32)
         if i < hist_size:
-            curr[:, :, :, list(range(i+1))] = traj[None, :, :, list(range(i+1))]
+            ext[i, :, :, :i+1] = padded_batch[:, :, :, i::-1]
         else:
-            curr = traj[None, :, :, i-hist_size:i]
-        ret = np.concatenate((ret, curr), axis=0)
+            mask = i < lengths
+            ext[i, mask, :, :] = padded_batch[:, mask, :, i:i-hist_size:-1]
+    return ext
 
-    return ret
 
+# def generate_external(traj, hist_size):
+#     """
+#     generate external memory for training. the first (hist_size) frames are
+#     padded with zeros.
+#     Args:
+#         traj(np.array (n_fram, n_traj, n_feature)):
+#
+#     Returns:
+#         external(np.array (n_fram, n_traj, n_feature, hist_size))
+#
+#     """
+#     n_frame, n_batch, n_feature = traj.shape
+#     traj = np.rollaxis(traj, 0, 3)  # (64, 4, 20)
+#     ret = np.empty((0, n_batch, n_feature, hist_size), dtype=np.float32)
+#     for i in range(n_frame):
+#         curr = np.zeros((1, n_batch, n_feature, hist_size), dtype=np.float32)
+#         if i < hist_size:
+#             curr[:, :, :, list(range(i+1))] = traj[None, :, :, list(range(i+1))]
+#         else:
+#             curr = traj[None, :, :, i-hist_size:i]
+#         ret = np.concatenate((ret, curr), axis=0)
+#
+#     return ret
+
+# def get_batch(samples, n_traj=64, n_frame=20):
+#     """
+#     return a (10, 64, 4) matrix, (n_frame, n_traj, bbox)
+#         and a (10, 64, 2) matrix for vid and frame indexing (to generate filename)
+#         This method need to be fixed. It generate sample with replacement.
+#
+#     Args:
+#         samples(list[traj]): return value from generate_training_samples()
+#         n_traj: number of traj for training batch (batch number)
+#         n_frame: number of time step.
+#
+#     Returns:
+#         training_sample(np.array (n_frame, n_traj, feature_size)):
+#         idx_vid_frame (np.array (n_frame, n_traj, 2)): the last dimension contain
+#             video and frame number.
+#     """
+#     idx = np.random.choice(len(samples), size=n_traj)
+#     trajs = [samples[i] for i in idx]
+#     ret = np.empty((0, n_frame, 6), dtype=np.float32)
+#     for t in trajs:
+#         i = np.random.choice(len(t) - n_frame + 1)
+#         sel = t[i:i + n_frame, :]
+#         ret = np.concatenate((ret, sel[None, :, :]))
+#     ret = np.swapaxes(ret, 0, 1)
+#
+#     return ret[:, :, 2:6], ret[:, :, 0:2]
+
+# def uniform_sample_bbox(bboxs):
+#     """ Select a bbox from input bboxs. Return an empty array if bboxs is empty.
+#
+#     Args:
+#         bboxs (numpy array): (n, 4) where n can be 0
+#
+#     Returns:
+#         bbox_sel (numpy array): (1, 4)
+#
+#     """
+#     if bboxs.shape[0] == 0:
+#         return bboxs
+#     else:
+#         return bboxs[np.random.choice(bboxs.shape[0]), :]
 

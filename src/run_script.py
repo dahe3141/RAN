@@ -1,13 +1,13 @@
 import argparse
 import os
-from utils import load_mot16_gt, load_mot16_det, generate_training_samples, get_batch
-from train import loss_fn, train, trainIters
+from train import trainIters
 from models import RAN
 
 import torch as t
+from torch.utils.data import DataLoader
 import torch.nn as nn
 import pickle
-
+from data_loader import MOT16_train_dataset, pad_packed_collate
 
 
 # change the mot17_root_dir to the "MOT16" dir and run
@@ -30,29 +30,22 @@ def main(args):
     #     exit()
 
     mot16_root_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "MOT16"))
+    train_dataset = MOT16_train_dataset(mot16_root_dir,
+                                        saved_path='saved_data',
+                                        val_id=7,
+                                        trans_func=None)
 
-    # load training data
-    saved_path = os.path.join(mot16_root_dir, 'train_samples')
-    if os.path.exists(saved_path):
-        with open(saved_path, 'rb') as f:
-            train_samples, mot_train_seq = pickle.load(f)
-    else:
-        gt, mot_train_seq = load_mot16_gt(mot16_root_dir)
-        det = load_mot16_det(mot16_root_dir, mot_train_seq)
-        train_samples = generate_training_samples(det, gt, mot_train_seq)
-
-        with open(saved_path, 'wb+') as f:
-            pickle.dump((train_samples, mot_train_seq), f)
-
-    use_cuda = t.cuda.is_available()
-
+    train_data_loader = DataLoader(train_dataset,
+                                   batch_size=64,
+                                   shuffle=True,
+                                   num_workers=1,
+                                   collate_fn=pad_packed_collate)
     m = RAN(input_size=4,
             hidden_size=32,
             history_size=10,
             drop_rate=0.5)
 
-
-    trainIters(m, train_samples, n_iters=5)
+    trainIters(m, train_data_loader, n_epoch=100)
 
 
 
