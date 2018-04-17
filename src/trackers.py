@@ -1,6 +1,7 @@
 import torch
 from torch.autograd import Variable
 import numpy as np
+import math
 from sklearn.utils.linear_assignment_ import linear_assignment
 from scipy.optimize import linear_sum_assignment
 from collections import deque
@@ -122,8 +123,14 @@ class RANTrack(object):
         Computes similarity between the RANTrack and the new detection
         """
 
-        # linear combination of instances in the external memory using alpha
-        pass
+        # compute log probability
+        diff2 = torch.pow(self.mu_bbox - bbox, 2)
+        M = (diff2 / self.sigma_bbox).sum()
+        log_scale = self.sigma_bbox.log().sum()
+
+        constant = math.log(2 * math.pi) * len(bbox)
+
+        return -0.5 * (constant + log_scale + M)
 
 
 class RANTracker(object):
