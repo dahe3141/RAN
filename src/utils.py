@@ -211,7 +211,7 @@ def generate_training_samples(det_all, gt_all, val_id=7, min_len=20):
                 img_id = np.vstack(((i+1) * np.ones(gt_traj['frame_num'].shape),
                                     gt_traj['frame_num'],)).astype(np.int)
 
-                train_samples.append(traj_train)
+                train_samples.append(traj_train.astype(np.float32))
                 img_id_train_samples.append(img_id.transpose())
 
         c.append(cc)
@@ -223,6 +223,22 @@ def generate_training_samples(det_all, gt_all, val_id=7, min_len=20):
 
     # Note: I decide to drop the vid index and mix all tracks
     return train_samples, img_id_train_samples
+
+
+def uniform_sample_bbox(bboxs):
+    """ Select a bbox from input bboxs. Return an empty array if bboxs is empty.
+
+    Args:
+        bboxs (numpy array): (n, 4) where n can be 0
+
+    Returns:
+        bbox_sel (numpy array): (1, 4)
+
+    """
+    if bboxs.shape[0] == 0:
+        return bboxs
+    else:
+        return bboxs[np.random.choice(bboxs.shape[0]), :]
 
 
 def generate_external(padded_batch,  lengths, hist_size):
@@ -305,18 +321,5 @@ def generate_external(padded_batch,  lengths, hist_size):
 #
 #     return ret[:, :, 2:6], ret[:, :, 0:2]
 
-# def uniform_sample_bbox(bboxs):
-#     """ Select a bbox from input bboxs. Return an empty array if bboxs is empty.
-#
-#     Args:
-#         bboxs (numpy array): (n, 4) where n can be 0
-#
-#     Returns:
-#         bbox_sel (numpy array): (1, 4)
-#
-#     """
-#     if bboxs.shape[0] == 0:
-#         return bboxs
-#     else:
-#         return bboxs[np.random.choice(bboxs.shape[0]), :]
+
 
