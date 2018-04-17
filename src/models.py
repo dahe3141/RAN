@@ -3,6 +3,7 @@ import torch as t
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.nn.init import xavier_uniform
+from torch.nn.utils.rnn import pad_packed_sequence
 from torch.nn.parameter import Parameter
 
 use_cuda = t.cuda.is_available()
@@ -39,23 +40,31 @@ class RAN(nn.Module):
 
     def forward(self, x, hidden):
         """
-
+        Compute autoregressive parameter and variance.
+        T is the longest sequence in the batch
+        B is batch size / number of trajectories
+        F is feature size
+        H is history size
         Args:
-            x: (seq_len, batch, input_size) (20, 64, 4)
-            hidden: (1, batch, hidden_size) (1, 64, 32)
+            x (PackedSequence): (T, B, F) (20, 64, 4)
+            hidden (Variable): (1, B, hidden_size) (1, 64, 32)
 
         Returns:
-            alpha: (seq_len, batch, history) (1, 64, 10)
-            sigma: (seq_len, batch, feature) (1, 64, 4)
+            alpha (Variable): (T, B, H)
+            sigma (Variable): (T, B, F)
+            h_n (Variable): (1, B, hidden_size)
         """
         # RNNdropout is not implemented
-        # output (seq_len, batch, hidden_size)
-        # h_n (1, batch, hidden_size)
 
         output, h_n = self.gru(x, hidden)  # output (20, 64, 32)
-        a = self.linear_alpha(output)  # (1, 64, 10)
-        alpha = self.softmax(a)  # (1, 64, 10)
-        sigma = t.exp(self.linear_sigma(output))  # (1, 64, 4)
+        # unpack output and pad with zeros
+        output_padded, lengths = pad_packed_sequence(output)
+
+        alpha = self.softmax(self.linear_alpha(output_padded))  # (T, 64, 10)
+        sigma = t.exp(self.linear_sigma(output_padded))  # (T, 64, 4)
+        # trim off padding
+        # alpha = [alpha[0:l, i, :] for i, l in enumerate(lengths)]
+        # sigma = [sigma[0:l, i, :] for i, l in enumerate(lengths)]
         return alpha, sigma, h_n
 
 
