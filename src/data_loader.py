@@ -7,22 +7,18 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 
 
-from utils import load_mot16_det, load_mot16_gt, generate_training_samples
+from utils import load_mot16_det, load_mot16_gt, generate_training_samples, generate_img_fn
 import pickle
 import matplotlib.pyplot as plt
 from torch.nn.utils.rnn import pack_padded_sequence as pack, pad_packed_sequence as unpack
 from torch.autograd import Variable
 
-# Ignore warnings
-import warnings
-warnings.filterwarnings("ignore")
-
-
 
 class MOT16_train_dataset(Dataset):
     """Face Landmarks dataset."""
 
-    def __init__(self, root, saved_path='saved_data', val_id=7, trans_func=None):
+    def __init__(self, root, saved_path='saved_data', val_id=7,
+                 trans_func=None, overwrite=False):
         """
         Args:
             root (string): root path to MOT16 data dir.
@@ -38,6 +34,9 @@ class MOT16_train_dataset(Dataset):
         self.root = root
         self.val_id = val_id
         self.trans_func = trans_func
+        if overwrite & os.path.exists(saved_path):
+            os.remove(saved_path)
+
         if os.path.exists(saved_path):
             print("loading saved data from {}".format(saved_path))
             with open(saved_path, 'rb') as f:
@@ -76,27 +75,7 @@ class MOT16_train_dataset(Dataset):
         return self.train_samples[idx]
 
 
-def generate_img_fn(root, mot_train_seq, img_id, Train=True):
-    """
-    Generate all filenames of a given sequence
-    Args:
-        root (str): data root dir
-        mot_train_seq (list): list of video names
-        img_id (ndarray): (n, 2)  <vid_num frame_num>
-        Train (bool): vid in train dir or test dir
 
-    Returns: (list) list of path to videos. same order as in img_id
-    """
-    ret = []
-    if Train:
-        sub = 'train'
-    else:
-        sub = 'test'
-
-    for i in range(img_id.shape[0]):
-        ret.append(os.path.join(root, sub, mot_train_seq[img_id[i, 0]],
-                                'img1', '{0:06d}.jpg'.format(img_id[i, 1])))
-    return ret
 
 
 # collate_fn([dataset[i] for i in batch_indices])

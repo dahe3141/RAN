@@ -1,5 +1,11 @@
 import numpy as np
 import os
+import pylab as pl
+import matplotlib.patches as patches
+from videofig import videofig
+from scipy.misc import imread
+from matplotlib.pyplot import Rectangle, Text
+
 
 def load_mot16_gt(data_root):
     """Parse MOT16 ground truth data
@@ -165,7 +171,8 @@ def generate_training_samples(det_all, gt_all, val_id=7, min_len=20):
             Each traj is represented by a ndarray of (n, 4) [bbox]
             Note: the bbox contain change in center pixel not the absolute location
         img_id_samples (list): same as train_samples but contain image id info
-            Each track is represented by a ndarray of (n, 2) [vid_num frame_num]
+            Each track is represented by a ndarray of
+            (n, 3) [vid_num track_id frame_num]
 
     """
     # currently 458 training trajectories
@@ -209,7 +216,8 @@ def generate_training_samples(det_all, gt_all, val_id=7, min_len=20):
                 traj_train[1:, 0:2] -= traj_train[0:-1, 0:2]
                 traj_train[0, 0:2] = 0
                 img_id = np.vstack(((i+1) * np.ones(gt_traj['frame_num'].shape),
-                                    gt_traj['frame_num'],)).astype(np.int)
+                                    gt_traj['track_id'],
+                                    gt_traj['frame_num'])).astype(np.int)
 
                 train_samples.append(traj_train.astype(np.float32))
                 img_id_train_samples.append(img_id.transpose())
@@ -269,6 +277,141 @@ def generate_external(padded_batch,  lengths, hist_size):
             ext[i, mask, :, :] = padded_batch[:, mask, :, i:i-hist_size:-1]
     return ext
 
+
+def generate_img_fn(root, mot_train_seq, img_id, train=True):
+    """
+    Generate all filenames of a given sequence
+    Args:
+        root (str): data root dir
+        mot_train_seq (list): list of video names
+        img_id (ndarray): (n, 2)  <vid_num frame_num>
+        Train (bool): vid in train dir or test dir
+
+    Returns: (list) list of path to videos. same order as in img_id
+    """
+    ret = []
+    if train:
+        sub = 'train'
+    else:
+        sub = 'test'
+    img_id = img_id.tolist()
+    ret = [os.path.join(root, sub, mot_train_seq[i[0]-1],
+                 'img1', '{0:06d}.jpg'.format(i[2])) for i in img_id]
+    return ret
+
+
+def show_track(idx, data_set):
+    """
+    visualize a track for sanity check
+    Args:
+        idx(int): track index 434 total tracks currently
+        data_set(MOT16_train_dataset):
+
+    Returns:
+
+    """
+    root = data_set.root
+    gt = data_set.gt
+    sample = data_set.train_samples
+    img_id = data_set.img_id
+    mot_train_seq = data_set.mot_train_seq
+    if idx + 1 > len(img_id):
+        idx = len(img_id)
+    elif idx < 0:
+        idx = len(img_id) + idx
+
+    # working with samples
+    img_id = img_id[idx]
+    vid_id = img_id[0][0] - 1
+    track_id = img_id[0][1]
+    frame_num = img_id[:, 2]
+    sample = sample[idx]
+
+    # working with gt
+    gt = gt[vid_id]
+    mask_track = gt['track_id'] == track_id
+    track_gt = gt[mask_track][['frame_num', 'x', 'y', 'w', 'h']]
+
+    # find intersection. it is a pain in the ass working with structured array!
+    frame_num_gt = track_gt['frame_num']
+    mask_intersect = np.isin(frame_num_gt, frame_num, assume_unique=True)
+    track_gt = track_gt[mask_intersect][['x', 'y', 'w', 'h']]
+
+    # align initial center
+    sample[0][0] = track_gt[0][0]
+    sample[0][1] = track_gt[0][1]
+    # cumsum
+    sample[:, 0:2] = np.cumsum(sample[:, 0:2], axis=0)
+
+    print("playing vid {}".format(mot_train_seq[vid_id]))
+    img_files = generate_img_fn(root, mot_train_seq, img_id)
+
+    # track_gt[0]
+    # tuple(sample[0].tolist())
+    def redraw_fn(f, axes):
+        img = imread(img_files[f])
+
+        x1, y1, w1, h1 = track_gt[f]
+        x2, y2, w2, h2 = tuple(sample[f].tolist())
+        x1 = int(x1 - w1/2)
+        x2 = int(x2 - w2/2)
+        y1 = int(y1 - h1/2)
+        y2 = int(y2 - h2/2)
+        if not redraw_fn.initialized:
+            im = axes.imshow(img, animated=True)
+            bb1 = Rectangle((x1, y1), w1, h1,
+                           fill=False,  # remove background
+                           edgecolor="red",
+                            gid='gt')
+            bb2 = Rectangle((x2, y2), w2, h2,
+                            fill=False,  # remove background
+                            edgecolor="blue",
+                            gid='sample')
+
+            t1 = axes.text(0, 0, '[{} {}]'.format(x1, y1),
+                           bbox=dict(facecolor='red', alpha=0.5))
+            t2 = axes.text(300, 0, '[{} {}]'.format(x2, y2),
+                           bbox=dict(facecolor='blue', alpha=0.5))
+
+            axes.add_patch(bb1)
+            axes.add_patch(bb2)
+            redraw_fn.im = im
+            redraw_fn.bb1 = bb1
+            redraw_fn.bb2 = bb2
+            redraw_fn.t1 = t1
+            redraw_fn.t2 = t2
+            redraw_fn.initialized = True
+        else:
+            redraw_fn.im.set_array(img)
+            redraw_fn.bb1.set_xy((x1, y1))
+            redraw_fn.bb1.set_width(w1)
+            redraw_fn.bb1.set_height(h1)
+            redraw_fn.t1.set_text('[{} {}]'.format(x1, y1))
+            redraw_fn.bb2.set_xy((x2, y2))
+            redraw_fn.bb2.set_width(w2)
+            redraw_fn.bb2.set_height(h2)
+            redraw_fn.t2.set_text('[{} {}]'.format(x2, y2))
+            # redraw_fn.t2.set_y(y2)
+
+    redraw_fn.initialized = False
+    videofig(len(img_files), redraw_fn, play_fps=30)
+
+
+    # # for f in frame_num:
+    # img = None
+    # for f in files:
+    #     im = pl.imread(f)
+    #     if img is None:
+    #         img = pl.imshow(im)
+    #     else:
+    #         img.set_data(im)
+    #
+    #     img.add_patch(
+    #         patches.Rectangle((bbox[0], bbox[1]), bbox[2], bbox[3], fill=False,
+    #                           lw=1, ec=colours[bbox[4] % 32, :]))
+    #     ax1.set_adjustable('box-forced')
+    #     pl.pause(.1)
+    #     pl.draw()
 
 # def generate_external(traj, hist_size):
 #     """

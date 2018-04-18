@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 import torch.nn as nn
 import pickle
 from data_loader import MOT16_train_dataset, pad_packed_collate
-
+from utils import show_track
 
 # change the mot17_root_dir to the "MOT16" dir and run
 def main(args):
@@ -75,6 +75,25 @@ def main(args):
 
 
 
+def sanity(idx):
+
+    mot16_root_dir = os.path.abspath(
+        os.path.join(os.path.pardir, "Data", "MOT16"))
+
+    train_dataset = MOT16_train_dataset(mot16_root_dir,
+                                        saved_path='saved_data',
+                                        val_id=7,
+                                        trans_func=None)
+    gt = train_dataset.gt
+    sample = train_dataset.train_samples
+    img_id = train_dataset.img_id
+    mot_train_seq = train_dataset.img_id
+
+    show_track(idx, train_dataset)
+
+    pass
+
+
 
 
 
@@ -91,4 +110,7 @@ if __name__ == '__main__':
     #
     # args = parser.parse_args()
     # main(args)
-    main("none")
+
+    sanity(100)
+
+    # main("none")
