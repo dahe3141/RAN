@@ -4,11 +4,14 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torch.nn.init import xavier_uniform
 from torch.nn.utils.rnn import pad_packed_sequence, PackedSequence
+import os
+import time
 from torch.nn.parameter import Parameter
 
 use_cuda = t.cuda.is_available()
 class RAN(nn.Module):
-    def __init__(self, input_size, hidden_size, history_size, drop_rate):
+    def __init__(self, input_size, hidden_size, history_size, drop_rate,
+                 save_path='ran.pt'):
         super(RAN, self).__init__()
         self.hidden_size = hidden_size
         self.input_size = input_size
@@ -26,6 +29,7 @@ class RAN(nn.Module):
         self.softmax = nn.Softmax(dim=-1)  # for batch training, need dim info.
         # self.drop = nn.Dropout(drop_rate)
         self.init_weight()
+        self.save_path = save_path
 
     def init_hidden(self, batch_size):
         result = Variable(t.zeros(1, batch_size, self.hidden_size))
@@ -67,5 +71,29 @@ class RAN(nn.Module):
         # alpha = [alpha[0:l, i, :] for i, l in enumerate(lengths)]
         # sigma = [sigma[0:l, i, :] for i, l in enumerate(lengths)]
         return alpha, sigma, h_n
+
+
+def save_model(m, p=None):
+    """This functions cannot be inside the model"""
+    if not p: p = m.save_path
+
+    if os.path.exists(p):
+        print("file exist: model not saved. choose another name.")
+    else:
+        t.save(m.state_dict(), p)
+
+
+def load_model(m, p=None):
+    """
+    You have to build the exact model first
+    """
+    if p:
+        print("loading from {}".format(p))
+        m.load_state_dict(t.load(p))
+    else:
+        print('loading model from default path')
+        m.load_state_dict(t.load(m.save_path))
+
+
 
 
