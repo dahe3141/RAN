@@ -195,7 +195,8 @@ def generate_training_samples(det_all, gt_all, val_id=7, min_len=20):
             gt_traj = gt[gt['track_id'] == t]
             traj_train = np.empty((0, 4))
             for f in gt_traj:
-                gt_bbox = f[['x', 'y', 'w', 'h']]
+                #gt_bbox = f[['x', 'y', 'w', 'h']]
+                gt_bbox = np.array([f['x'], f['y'], f['w'], f['h']])
                 det_mask = det['frame_num'] == f['frame_num']
                 # There are frames without any detection
                 if not np.any(det_mask):

@@ -89,7 +89,8 @@ def trainIters(model, dataloader, n_epoch, lr=0.001, betas=(0.9, 0.99), eps=1e-8
     print(i, ' iterations')
     print('min loss ', np.array(total_loss).min())
     plt.plot(total_loss)
-    plt.ylabel('some numbers')
+    plt.ylabel('Negative Log-likelihood')
+    plt.xlabel('Batches')
     plt.show()
 
 

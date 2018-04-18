@@ -122,11 +122,11 @@ class RANTrack(object):
         """
         Computes similarity between the RANTrack and the new detection
         """
-
+        # TODO: similarity should handle feature
         # compute log probability
-        diff2 = torch.pow(self.mu_bbox - bbox, 2)
+        diff2 = (self.mu_bbox - bbox) ** 2
         M = (diff2 / self.sigma_bbox).sum()
-        log_scale = self.sigma_bbox.log().sum()
+        log_scale = np.log(self.sigma_bbox).sum()
 
         constant = math.log(2 * math.pi) * len(bbox)
 
@@ -163,7 +163,6 @@ class RANTracker(object):
         self._next_id += 1
 
     def _match(self, detections, features=None):
-        # TODO: similarity should handle feature
         if len(self.tracks) == 0:
             return np.empty((0, 2), dtype=int), np.arange(len(detections)), np.empty((0, 4))
 
@@ -199,6 +198,7 @@ if __name__ == '__main__':
     ran = RAN(input_size=4, hidden_size=32, history_size=10, drop_rate=0.5).cuda()
 
     bbox = np.array([2, 3, 40, 50], dtype=np.float32)
+    bbox2 = np.array([2, 4, 45, 56], dtype=np.float32)
     track_id = 300
     n = 3
     max_age = 30
@@ -209,3 +209,4 @@ if __name__ == '__main__':
     track.predict()
     print(track.mu_bbox)
     print(track.sigma_bbox)
+    print(track.similarity(bbox2))
