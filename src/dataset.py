@@ -15,26 +15,31 @@ from torch.autograd import Variable
 
 
 class MOT16_train_dataset(Dataset):
-    """Face Landmarks dataset."""
+    """ MOT16 dataset.
 
-    def __init__(self, root, saved_path='saved_data', val_id=7,
+    Args:
+        root (string): root path to MOT16 data dir.
+        saved_path (string): Directory to save data on disk.
+        trans_func (callable, optional): Optional transform to be applied
+            on a sample.
+        val_id (int): indicate which video is used for validation.
+            training samples will not be generated on that video.
+            to use validation data, call data.det[data.val_id - 1] and
+            data.gt[data.val_id - 1]
+
+    """
+    processed_folder = 'processed'
+    training_file = 'train.pt'
+
+    def __init__(self, root, val_id=7,
                  trans_func=None, overwrite=False):
-        """
-        Args:
-            root (string): root path to MOT16 data dir.
-            saved_path (string): Directory to save data on disk.
-            trans_func (callable, optional): Optional transform to be applied
-                on a sample.
-            val_id (int): indicate which video is used for validation.
-                training samples will not be generated on that video.
-                to use validation data, call data.det[data.val_id - 1] and
-                data.gt[data.val_id - 1]
-        """
-        saved_path = os.path.join(root, saved_path)
-        self.root = root
+
+        self.root = os.path.expanduser(root)
         self.val_id = val_id
         self.trans_func = trans_func
-        if overwrite & os.path.exists(saved_path):
+        saved_path = os.path.join(self.root, self.processed_folder, self.training_file)
+
+        if overwrite and os.path.exists(saved_path):
             os.remove(saved_path)
 
         if os.path.exists(saved_path):
@@ -44,8 +49,11 @@ class MOT16_train_dataset(Dataset):
                     self.det = pickle.load(f)
         else:
             print('generating data and saving to {}'.format(saved_path))
-            self.gt, self.mot_train_seq = load_mot16_gt(root)
-            self.det = load_mot16_det(root, self.mot_train_seq)
+            if not os.path.exists(os.path.join(self.root, self.processed_folder)):
+                os.mkdir(os.path.join(self.root, self.processed_folder))
+
+            self.gt, self.mot_train_seq = load_mot16_gt(self.root)
+            self.det = load_mot16_det(self.root, self.mot_train_seq)
             self.train_samples, self.img_id = \
                 generate_training_samples(self.det, self.gt, val_id=val_id)
 
