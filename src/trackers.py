@@ -29,7 +29,7 @@ class TrackState(object):
 
 
 class RANTrack(object):
-    def __init__(self, bbox, track_id, n_init, max_age, ran_model, feature=None):
+    def __init__(self, bbox, track_id, ran_model, feature=None, n_init=3, max_age=10):
         self.track_id = track_id
         self.age = 1
         self.hits = 1
@@ -70,7 +70,7 @@ class RANTrack(object):
 
     def update(self, bbox, feature=None):
         """
-        update bbox_diff and external memory using the associated detection
+        compute bbox_diff and external memory using the associated detection
         """
         self.hits += 1
         self.time_since_update = 0
@@ -141,7 +141,9 @@ class RANTrack(object):
 
 
 class RANTracker(object):
-    def __init__(self, max_age=30, memory_size=10):
+    def __init__(self, ran_model, max_age=30, memory_size=10):
+        self.ran_model = ran_model
+
         self.max_age = max_age
         self.memory_size = memory_size
         self.min_similarity = 0
@@ -158,25 +160,43 @@ class RANTracker(object):
 
     def update(self, bboxes, features=None):
 
-
         # run matching
+        matches, unmatched_tracks, unmatched_detections = self._match(bboxes)
+
         # update tracks
+        for track_idx, detection_idx in matches:
+            self.tracks[track_idx].update(bboxes[detection_idx])
+
         # mark missed tracks
+        for track_idx in unmatched_tracks:
+            self.tracks[track_idx].mark_missed()
         # initiate new tracks
-        pass
+        for detection_idx in unmatched_detections:
+            self._init_track(bboxes[detection_idx])
+
+        self.tracks = [t for t in self.tracks if not t.is_deleted()]
 
     def _init_track(self, bbox, feature=None):
-        self.tracks.append(RANTrack(bbox, self._next_id, feature))
+        self.tracks.append(RANTrack(bbox, self._next_id, self.ran_model, feature))
         self._next_id += 1
 
     def _match(self, detections, features=None):
-        if len(self.tracks) == 0:
-            return np.empty((0, 2), dtype=int), np.arange(len(detections)), np.empty((0, 4))
+        """
+
+
+        Returns
+        ------
+        * [List] Indices of matched tracks and detections
+        * [List] Indices of unmatched tracks
+        * [List] Indices of unmatched detections
+        """
+        if len(self.tracks) == 0 or len(detections) == 0:
+            return [], np.arange(len(self.tracks)), np.arange(len(detections))
 
         sim_matrix = np.zeros((len(detections), len(self.tracks)), dtype=np.float32)
 
-        for d, det in detections:
-            for t, trk in self.tracks:
+        for d, det in enumerate(detections):
+            for t, trk in enumerate(self.tracks):
                 sim_matrix[d, t] = trk.similarity(det)
 
         matched_indices = linear_assignment(-sim_matrix)
@@ -201,19 +221,37 @@ class RANTracker(object):
 
 
 if __name__ == '__main__':
-    from models import RAN
-    ran = RAN(input_size=4, hidden_size=32, history_size=10, drop_rate=0.5).cuda()
+    from models import RAN, load_model
 
-    bbox = np.array([2, 3, 40, 50], dtype=np.float32)
-    bbox2 = np.array([2, 4, 45, 56], dtype=np.float32)
-    track_id = 300
-    n = 3
-    max_age = 30
-    track = RANTrack(bbox, track_id, n, max_age, ran)
-    track.predict()
-    print(track.mu_motion)
-    print(track.sigma_motion)
-    track.predict()
-    print(track.mu_motion)
-    print(track.sigma_motion)
-    print(track.similarity(bbox2))
+    model_save_prefix = "/scratch0/RAN/trained_model/ran"
+
+    # load model
+    ran = RAN(input_size=4,
+              hidden_size=32,
+              history_size=10,
+              drop_rate=0.5,
+              save_path=model_save_prefix)
+    load_model(ran)
+    ran = ran.cuda()
+    ran.eval()
+
+    bbox1_1 = np.array([500, 500, 40, 50], dtype=np.float32)
+    bbox1_2 = np.array([100, 200, 60, 60], dtype=np.float32)
+    bbox1_3 = np.array([400, 300, 70, 70], dtype=np.float32)
+    bbox1_4 = np.array([200, 100, 80, 80], dtype=np.float32)
+
+    bbox2_1 = np.array([512, 490, 40, 50], dtype=np.float32)
+    bbox2_2 = np.array([400, 330, 70, 75], dtype=np.float32)
+    bbox2_3 = np.array([110, 198, 65, 65], dtype=np.float32)
+    bbox2_4 = np.array([200, 120, 85, 85], dtype=np.float32)
+    bbox2_5 = np.array([100, 100, 45, 45], dtype=np.float32)
+
+    # gt for matching:
+    # 1->1, 2->3, 3->2, 4->4, []->5
+
+    tracker = RANTracker(ran)
+    tracker.predict()
+    tracker.update([bbox1_1, bbox1_2, bbox1_3, bbox1_4])
+    tracker.predict()
+    tracker.update([bbox2_1, bbox2_2, bbox2_3, bbox2_4, bbox2_5])
+    print('Hi')
