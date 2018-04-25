@@ -29,7 +29,7 @@ class TrackState(object):
 
 
 class RANTrack(object):
-    def __init__(self, bbox, track_id, n_init, max_age, ran_model, feature=None):
+    def __init__(self, bbox, track_id, ran_model, feature=None, n_init=3, max_age=10):
         self.track_id = track_id
         self.age = 1
         self.hits = 1
@@ -39,7 +39,7 @@ class RANTrack(object):
         self._max_age = max_age
         self._n_init = n_init
 
-        # TODO: save observed bbox and estimate bbox offset
+        self.prev_bbox = bbox
 
         # RAN include:
         #     (1)RNN hidden states
@@ -52,34 +52,41 @@ class RANTrack(object):
         input_size = ran_model.input_size
 
         self.model = ran_model
-        self.h_bbox = ran_model.init_hidden(batch_size=1)
+        self.h_motion = ran_model.init_hidden(batch_size=1)
         self.h_feature = 0
 
         # RAN outputs
-        self.alpha_bbox = np.zeros(memory_size, dtype=np.float32)
-        self.sigma_bbox = np.ones(input_size, dtype=np.float32)
+        self.alpha_motion = np.zeros(memory_size, dtype=np.float32)
+        self.sigma_motion = np.ones(input_size, dtype=np.float32)
 
         # predicted mean vector from the AR model
-        self.mu_bbox = np.zeros(input_size, dtype=np.float32)
+        self.mu_motion = np.zeros(input_size, dtype=np.float32)
 
         # external memory
-        self.external_bbox = deque([np.zeros(input_size, dtype=np.float32) for _ in range(memory_size)], maxlen=memory_size)
+        self.external_motion = deque([np.zeros(input_size, dtype=np.float32) for _ in range(memory_size)], maxlen=memory_size)
         self.external_feature = deque([np.zeros(input_size, dtype=np.float32) for _ in range(memory_size)], maxlen=memory_size)
 
         self.update(bbox, feature)
 
     def update(self, bbox, feature=None):
+        """
+        compute bbox_diff and external memory using the associated detection
+        """
         self.hits += 1
         self.time_since_update = 0
 
         if self.state == TrackState.Tentative and self.hits >= self._n_init:
             self.state = TrackState.Confirmed
 
-        # add associated bbox and feature to external memory
-        self.external_bbox.append(bbox)
+        # compute bbox_diff
+        bbox_diff = bbox - self.prev_bbox
+        self.prev_bbox = bbox
+
+        # add bbox_diff and feature to external memory
+        self.external_motion.append(bbox_diff)
         self.external_feature.append(feature)
 
-        self.bbox = to_var(bbox).view(1, 1, -1)
+        self.bbox_diff = to_var(bbox_diff).view(1, 1, -1)
 
         if feature is not None:
             self.feature = to_var(feature).view(1, 1, -1)
@@ -91,13 +98,13 @@ class RANTrack(object):
         self.time_since_update += 1
 
         # obtain h, alpha, sigma using RAN
-        alpha_bbox, sigma_bbox, self.h_bbox = self.model(self.bbox, self.h_bbox)
+        alpha_motion, sigma_motion, self.h_motion = self.model(self.bbox_diff, self.h_motion)
 
         # obtain mu using alpha and external memory
-        alpha_bbox = to_np(alpha_bbox.squeeze())
-        self.mu_bbox = np.matmul(alpha_bbox, np.array(self.external_bbox))
+        alpha_motion = to_np(alpha_motion.squeeze())
+        self.mu_motion = np.matmul(alpha_motion, np.array(self.external_motion))
 
-        self.sigma_bbox = to_np(sigma_bbox.squeeze())
+        self.sigma_motion = to_np(sigma_motion.squeeze())
 
     def mark_missed(self):
         if self.state == TrackState.Tentative:
@@ -120,13 +127,13 @@ class RANTrack(object):
 
     def similarity(self, bbox, feature=None):
         """
-        Computes similarity between the RANTrack and the new detection
+        Computes similarity between the RANTrack and a detection
         """
         # TODO: similarity should handle feature
         # compute log probability
-        diff2 = (self.mu_bbox - bbox) ** 2
-        M = (diff2 / self.sigma_bbox).sum()
-        log_scale = np.log(self.sigma_bbox).sum()
+        diff2 = (self.mu_motion - (bbox - self.prev_bbox)) ** 2
+        M = (diff2 / self.sigma_motion).sum()
+        log_scale = np.log(self.sigma_motion).sum()
 
         constant = math.log(2 * math.pi) * len(bbox)
 
@@ -134,7 +141,9 @@ class RANTrack(object):
 
 
 class RANTracker(object):
-    def __init__(self, max_age=30, memory_size=10):
+    def __init__(self, ran_model, max_age=30, memory_size=10):
+        self.ran_model = ran_model
+
         self.max_age = max_age
         self.memory_size = memory_size
         self.min_similarity = 0
@@ -151,25 +160,43 @@ class RANTracker(object):
 
     def update(self, bboxes, features=None):
 
-
         # run matching
+        matches, unmatched_tracks, unmatched_detections = self._match(bboxes)
+
         # update tracks
+        for track_idx, detection_idx in matches:
+            self.tracks[track_idx].update(bboxes[detection_idx])
+
         # mark missed tracks
+        for track_idx in unmatched_tracks:
+            self.tracks[track_idx].mark_missed()
         # initiate new tracks
-        pass
+        for detection_idx in unmatched_detections:
+            self._init_track(bboxes[detection_idx])
+
+        self.tracks = [t for t in self.tracks if not t.is_deleted()]
 
     def _init_track(self, bbox, feature=None):
-        self.tracks.append(RANTrack(bbox, self._next_id, feature))
+        self.tracks.append(RANTrack(bbox, self._next_id, self.ran_model, feature))
         self._next_id += 1
 
     def _match(self, detections, features=None):
-        if len(self.tracks) == 0:
-            return np.empty((0, 2), dtype=int), np.arange(len(detections)), np.empty((0, 4))
+        """
+
+
+        Returns
+        ------
+        * [List] Indices of matched tracks and detections
+        * [List] Indices of unmatched tracks
+        * [List] Indices of unmatched detections
+        """
+        if len(self.tracks) == 0 or len(detections) == 0:
+            return [], np.arange(len(self.tracks)), np.arange(len(detections))
 
         sim_matrix = np.zeros((len(detections), len(self.tracks)), dtype=np.float32)
 
-        for d, det in detections:
-            for t, trk in self.tracks:
+        for d, det in enumerate(detections):
+            for t, trk in enumerate(self.tracks):
                 sim_matrix[d, t] = trk.similarity(det)
 
         matched_indices = linear_assignment(-sim_matrix)
@@ -194,19 +221,37 @@ class RANTracker(object):
 
 
 if __name__ == '__main__':
-    from models import RAN
-    ran = RAN(input_size=4, hidden_size=32, history_size=10, drop_rate=0.5).cuda()
+    from models import RAN, load_model
 
-    bbox = np.array([2, 3, 40, 50], dtype=np.float32)
-    bbox2 = np.array([2, 4, 45, 56], dtype=np.float32)
-    track_id = 300
-    n = 3
-    max_age = 30
-    track = RANTrack(bbox, track_id, n, max_age, ran)
-    track.predict()
-    print(track.mu_bbox)
-    print(track.sigma_bbox)
-    track.predict()
-    print(track.mu_bbox)
-    print(track.sigma_bbox)
-    print(track.similarity(bbox2))
+    model_save_prefix = "/scratch0/RAN/trained_model/ran"
+
+    # load model
+    ran = RAN(input_size=4,
+              hidden_size=32,
+              history_size=10,
+              drop_rate=0.5,
+              save_path=model_save_prefix)
+    load_model(ran)
+    ran = ran.cuda()
+    ran.eval()
+
+    bbox1_1 = np.array([500, 500, 40, 50], dtype=np.float32)
+    bbox1_2 = np.array([100, 200, 60, 60], dtype=np.float32)
+    bbox1_3 = np.array([400, 300, 70, 70], dtype=np.float32)
+    bbox1_4 = np.array([200, 100, 80, 80], dtype=np.float32)
+
+    bbox2_1 = np.array([512, 490, 40, 50], dtype=np.float32)
+    bbox2_2 = np.array([400, 330, 70, 75], dtype=np.float32)
+    bbox2_3 = np.array([110, 198, 65, 65], dtype=np.float32)
+    bbox2_4 = np.array([200, 120, 85, 85], dtype=np.float32)
+    bbox2_5 = np.array([100, 100, 45, 45], dtype=np.float32)
+
+    # gt for matching:
+    # 1->1, 2->3, 3->2, 4->4, []->5
+
+    tracker = RANTracker(ran)
+    tracker.predict()
+    tracker.update([bbox1_1, bbox1_2, bbox1_3, bbox1_4])
+    tracker.predict()
+    tracker.update([bbox2_1, bbox2_2, bbox2_3, bbox2_4, bbox2_5])
+    print('Hi')
