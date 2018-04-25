@@ -23,7 +23,6 @@ class MOT16_train_dataset(Dataset):
 
     Args:
         root (string): root path to MOT16 data dir.
-        saved_path (string): Directory to save data on disk.
         trans_func (callable, optional): Optional transform to be applied
             on a sample.
         val_id (int): indicate which video is used for validation.
@@ -32,16 +31,17 @@ class MOT16_train_dataset(Dataset):
             data.gt[data.val_id - 1]
 
     """
+    processed_folder = 'processed'
+    training_file = 'train.pt'
 
-    def __init__(self, root, val_id=7, saved_path='saved_data',
-                 trans_func=None, overwrite=False, train_flag=True):
+    def __init__(self, root, val_id=7, trans_func=None, overwrite=False, train_flag=True):
 
         self.root = os.path.expanduser(root)
         self.val_id = val_id
         self.trans_func = trans_func
         self.train = train_flag
-        processed_folder = 'processed'
-        saved_path = os.path.join(self.root, processed_folder, saved_path)
+
+        saved_path = os.path.join(self.root, self.processed_folder, self.training_file)
 
         if overwrite and os.path.exists(saved_path):
             os.remove(saved_path)
