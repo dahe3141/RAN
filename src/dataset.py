@@ -14,6 +14,10 @@ from torch.nn.utils.rnn import pack_padded_sequence as pack, pad_packed_sequence
 from torch.autograd import Variable
 
 
+# TODO: validation set can be handeled with sampler. Dataset need to generate
+# TODO: all data.
+
+# TODO: random selection in IOU is saved in disk.
 class MOT16_train_dataset(Dataset):
     """ MOT16 dataset.
 
@@ -28,16 +32,16 @@ class MOT16_train_dataset(Dataset):
             data.gt[data.val_id - 1]
 
     """
-    processed_folder = 'processed'
-    training_file = 'train.pt'
 
-    def __init__(self, root, val_id=7,
-                 trans_func=None, overwrite=False):
+    def __init__(self, root, val_id=7, saved_path='saved_data',
+                 trans_func=None, overwrite=False, train_flag=True):
 
         self.root = os.path.expanduser(root)
         self.val_id = val_id
         self.trans_func = trans_func
-        saved_path = os.path.join(self.root, self.processed_folder, self.training_file)
+        self.train = train_flag
+        processed_folder = 'processed'
+        saved_path = os.path.join(self.root, processed_folder, saved_path)
 
         if overwrite and os.path.exists(saved_path):
             os.remove(saved_path)
@@ -45,24 +49,36 @@ class MOT16_train_dataset(Dataset):
         if os.path.exists(saved_path):
             print("loading saved data from {}".format(saved_path))
             with open(saved_path, 'rb') as f:
-                self.train_samples, self.img_id, self.mot_train_seq, self.gt,\
+                train_samples, img_id, self.mot_train_seq, self.gt,\
                     self.det = pickle.load(f)
         else:
             print('generating data and saving to {}'.format(saved_path))
-            if not os.path.exists(os.path.join(self.root, self.processed_folder)):
-                os.mkdir(os.path.join(self.root, self.processed_folder))
+            if not os.path.exists(os.path.dirname(saved_path)):
+                os.makedirs(os.path.dirname(saved_path))
 
             self.gt, self.mot_train_seq = load_mot16_gt(self.root)
             self.det = load_mot16_det(self.root, self.mot_train_seq)
-            self.train_samples, self.img_id = \
-                generate_training_samples(self.det, self.gt, val_id=val_id)
+            train_samples, img_id = \
+                generate_training_samples(self.det, self.gt)
 
             with open(saved_path, 'wb+') as f:
-                pickle.dump((self.train_samples, self.img_id,
+                pickle.dump((train_samples, img_id,
                              self.mot_train_seq, self.gt, self.det), f)
 
+        temp = [(s, i) for s, i in zip(train_samples, img_id)
+                if not i[0, 0] == val_id - 1]
+        self.train_samples, self.img_id = tuple(zip(*temp))
+        temp = [(s, i) for s, i in zip(train_samples, img_id)
+                if i[0, 0] == val_id - 1]
+        self.val_samples, self.val_img_id = tuple(zip(*temp))
+        print("there are {} training samples and {} validation samples"
+              .format(len(self.train_samples), len(self.val_samples)))
+
     def __len__(self):
-        return len(self.train_samples)
+        if self.train:
+            return len(self.train_samples)
+        else:
+            return len(self.val_samples)
 
     def __getitem__(self, idx):
         """
@@ -80,14 +96,13 @@ class MOT16_train_dataset(Dataset):
         # if self.trans_func:
         #     sample = self.trans_func(sample)
 
-        return self.train_samples[idx]
-
-
-
+        if self.train:
+            return self.train_samples[idx]
+        else:
+            return self.val_samples[idx]
 
 
 # collate_fn([dataset[i] for i in batch_indices])
-
 def pad_packed_collate(batch, hist_size=10):
     """Puts data, and lengths into a packed_padded_sequence then returns
        the packed_padded_sequence and the labels. Set use_lengths to True

@@ -2,3 +2,6 @@ Data/
 res/
 .idea/
 src/__pycache__
+src/scratch/
+seqmaps/
+*.tar

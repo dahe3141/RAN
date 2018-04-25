@@ -30,8 +30,11 @@ def main(args):
     #     exit()
 
     mot16_root_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "MOT16"))
+
+    # processed_folder = 'processed'
+    # training_file = 'train.pt'
+    # saved_path = os.path.join(processed_folder, training_file)
     train_dataset = MOT16_train_dataset(mot16_root_dir,
-                                        saved_path='saved_data',
                                         val_id=7,
                                         trans_func=None)
 
@@ -41,23 +44,28 @@ def main(args):
                                    num_workers=1,
                                    collate_fn=pad_packed_collate)
 
-    model_save_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "ran"))
-    m = RAN(input_size=4,
-            hidden_size=32,
-            history_size=10,
-            drop_rate=0.5,
-            save_path=model_save_dir)
+    # model_save_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "ran"))
+    # m = RAN(input_size=4,
+    #         hidden_size=32,
+    #         history_size=10,
+    #         drop_rate=0.5,
+    #         save_path=model_save_dir)
+    #
+    # trainIters(m, train_data_loader, n_epoch=100)
 
-    # trainIters(m, train_data_loader, n_epoch=10)
-
-    load_model(m)
+    # load_model(m)
     # save_model(m)
 
 
 
 def sanity(idx):
-    mot16_root_dir = "~/Projects/Datasets/MOT16"
+    # define saved_path:
+    # mot16_root_dir = "~/Projects/Datasets/MOT16"
+    # processed_folder = 'processed'
+    # training_file = 'train.pt'
+    # saved_path = os.path.join(processed_folder, training_file)
 
+    mot16_root_dir = os.path.join('Data', 'MOT16')
     train_dataset = MOT16_train_dataset(mot16_root_dir,
                                         val_id=7,
                                         trans_func=None,
@@ -77,6 +85,6 @@ if __name__ == '__main__':
     # args = parser.parse_args()
     # main(args)
 
-    sanity(100)
+    # sanity(100)
 
-    # main("none")
+    main("none")

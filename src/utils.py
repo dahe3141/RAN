@@ -7,6 +7,9 @@ from scipy.misc import imread
 from matplotlib.pyplot import Rectangle, Text
 
 
+mot16_train_seq = ['MOT16-13', 'MOT16-11', 'MOT16-10',
+                 'MOT16-09', 'MOT16-05', 'MOT16-04', 'MOT16-02']
+
 def load_mot16_gt(data_root):
     """Parse MOT16 ground truth data
     Args:
@@ -22,8 +25,10 @@ def load_mot16_gt(data_root):
     Note:
         The x,y coord returned for bbox is the center pixel location.
     """
-    mot_train_seq = os.listdir(os.path.join(data_root, 'train'))
-    mot_train_seq = [f for f in mot_train_seq if not f.startswith('.')]
+    # pre-defined mot_train_seq
+    mot_train_seq = mot16_train_seq
+    # mot_train_seq = os.listdir(os.path.join(data_root, 'train'))
+    # mot_train_seq = [f for f in mot_train_seq if not f.startswith('.')]
     mot_train_seq_gt_fn = [os.path.join(data_root, 'train', seq, 'gt',
                                     'gt.txt') for seq in mot_train_seq]
     gt = []
@@ -47,6 +52,7 @@ def load_mot16_gt(data_root):
         raw_gt['y'] += raw_gt['h'] / 2
         raw_gt = _remove_field_name(raw_gt, ['conf'])
         gt.append(raw_gt)
+    print('vid seq: ', mot_train_seq)
 
     return gt, mot_train_seq
 
@@ -94,6 +100,14 @@ def load_mot16_det(data_root, mot_train_seq):
 
 
 def _remove_field_name(a, name):
+    """
+    Delete named filed in structured array.
+    Args:
+        a (structured np array):
+        name (list): list of field name  s to be removed from a
+    Returns:
+        structured array with corresponding fields removed
+    """
     names = [n for n in list(a.dtype.names) if not (n in name)]
     return a[names]
 
@@ -153,7 +167,7 @@ def iou(gt_bbox, det_bboxs):
     return det_bboxs[iou_idx]
 
 
-def generate_training_samples(det_all, gt_all, val_id=7, min_len=20):
+def generate_training_samples(det_all, gt_all, min_len=20):
     """Generate training trajectories for all videos
 
     Args:
@@ -163,8 +177,6 @@ def generate_training_samples(det_all, gt_all, val_id=7, min_len=20):
         gt (list): list of trajectories for each video.
             each trajectory is represented by a np array.
             (n, 6) [frame_num, track_id, x, y, w, h]
-        val_id (int): indicate which video is used for validation. one-indexing.
-            max is 7.
 
     Return:
         train_samples (list): a list of generated training trajectories.
@@ -188,8 +200,7 @@ def generate_training_samples(det_all, gt_all, val_id=7, min_len=20):
     img_id_train_samples = []
     for i, gt, det in zip(range(len(gt_all)), gt_all, det_all):
         list_traj_id = np.unique(gt['track_id'])
-        if i+1 == val_id:
-            continue
+
         cc = 0
         for t in list_traj_id:
             gt_traj = gt[gt['track_id'] == t]
