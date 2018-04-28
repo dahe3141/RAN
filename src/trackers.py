@@ -83,8 +83,8 @@ class RANTrack(object):
         self.prev_bbox = bbox
 
         # add bbox_diff and feature to external memory
-        self.external_motion.append(bbox_diff)
-        self.external_feature.append(feature)
+        self.external_motion.appendleft(bbox_diff)
+        self.external_feature.appendleft(feature)
 
         self.bbox_diff = to_var(bbox_diff).view(1, 1, -1)
 
@@ -146,7 +146,7 @@ class RANTracker(object):
 
         self.max_age = max_age
         self.memory_size = memory_size
-        self.min_similarity = 0
+        self.min_similarity = -500
 
         self.tracks = []
         self._next_id = 1
@@ -247,7 +247,7 @@ if __name__ == '__main__':
     bbox2_5 = np.array([100, 100, 45, 45], dtype=np.float32)
 
     # gt for matching:
-    # 1->1, 2->3, 3->2, 4->4, []->5
+    # 0->0, 1->2, 2->1, 3->3, []->4
 
     tracker = RANTracker(ran)
     tracker.predict()

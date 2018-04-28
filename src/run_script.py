@@ -31,9 +31,6 @@ def main(args):
 
     mot16_root_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "MOT16"))
 
-    # processed_folder = 'processed'
-    # training_file = 'train.pt'
-    # saved_path = os.path.join(processed_folder, training_file)
     train_dataset = MOT16_train_dataset(mot16_root_dir,
                                         val_id=7,
                                         trans_func=None)

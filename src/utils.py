@@ -5,7 +5,7 @@ import matplotlib.patches as patches
 from videofig import videofig
 from scipy.misc import imread
 from matplotlib.pyplot import Rectangle, Text
-
+import cv2
 
 mot16_train_seq = ['MOT16-13', 'MOT16-11', 'MOT16-10',
                  'MOT16-09', 'MOT16-05', 'MOT16-04', 'MOT16-02']
@@ -167,7 +167,7 @@ def iou(gt_bbox, det_bboxs):
     return det_bboxs[iou_idx]
 
 
-def generate_training_samples(det_all, gt_all, min_len=20):
+def generate_training_samples(det_all, gt_all, min_len=20, gt_only=False):
     """Generate training trajectories for all videos
 
     Args:
@@ -198,6 +198,8 @@ def generate_training_samples(det_all, gt_all, min_len=20):
     c = []
     train_samples = []
     img_id_train_samples = []
+
+    # iterate over videos
     for i, gt, det in zip(range(len(gt_all)), gt_all, det_all):
         list_traj_id = np.unique(gt['track_id'])
 
@@ -208,25 +210,34 @@ def generate_training_samples(det_all, gt_all, min_len=20):
             for f in gt_traj:
                 #gt_bbox = f[['x', 'y', 'w', 'h']]
                 gt_bbox = np.array([f['x'], f['y'], f['w'], f['h']])
-                det_mask = det['frame_num'] == f['frame_num']
-                # There are frames without any detection
-                if not np.any(det_mask):
-                    cc += 1
+
+                if gt_only:
                     bbox_sel = np.array(gt_bbox.tolist())
+
                 else:
-                    det_bboxs = det[det_mask][['x', 'y', 'w', 'h']]  # all bbox in frame
-                    bbox_candidates = iou(gt_bbox, det_bboxs)
-                    bbox_sel = uniform_sample_bbox(bbox_candidates)
-                # no detected bbox can be associated to gt
-                if len(bbox_sel) == 0:
-                    bbox_sel = np.array(gt_bbox.tolist())
+                    det_mask = det['frame_num'] == f['frame_num']
+                    # There are frames without any detection
+                    if not np.any(det_mask):
+                        cc += 1
+                        bbox_sel = np.array(gt_bbox.tolist())
+                    else:
+                        det_bboxs = det[det_mask][['x', 'y', 'w', 'h']]  # all bbox in frame
+                        bbox_candidates = iou(gt_bbox, det_bboxs)
+                        bbox_sel = uniform_sample_bbox(bbox_candidates)
+                    # use gt bbox if no association can be found
+                    if len(bbox_sel) == 0:
+                        bbox_sel = np.array(gt_bbox.tolist())
 
                 traj_train = np.vstack((traj_train, bbox_sel))
                                     # np.hstack((i+1, f[0], ))))
+
+            # compute bbox displacement
             if len(traj_train) >= min_len:
-                # compute change in center pixel
-                traj_train[1:, 0:2] -= traj_train[0:-1, 0:2]
-                traj_train[0, 0:2] = 0
+
+                #traj_train[1:, 0:2] -= traj_train[0:-1, 0:2]
+                #traj_train[0, 0:2] = 0
+                traj_train[1:, :] -= traj_train[0:-1, :]
+                traj_train[0, :] = 0
                 img_id = np.vstack(((i+1) * np.ones(gt_traj['frame_num'].shape),
                                     gt_traj['track_id'],
                                     gt_traj['frame_num'])).astype(np.int)
@@ -408,6 +419,24 @@ def show_track(idx, data_set):
     redraw_fn.initialized = False
     videofig(len(img_files), redraw_fn, play_fps=30)
 
+
+def save_video(bboxes, img_files):
+    video = cv2.VideoWriter('video.avi', cv2.VideoWriter_fourcc(*"MJPG"), 1, (640, 480))
+
+    for bbox, img in zip(bboxes, img_files):
+        frame = cv2.imread(img)
+        frame = cv2.resize(frame, (640, 480))
+
+        x1, y1, w1, h1 = bbox
+        x1 = int(x1 - w1 / 2)
+        y1 = int(y1 - h1 / 2)
+        x2 = int(x1 + w1)
+        y2 = int(y1 + h1)
+
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+        video.write(frame)
+
+    video.release()
 
     # # for f in frame_num:
     # img = None
