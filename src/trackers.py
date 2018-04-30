@@ -146,7 +146,7 @@ class RANTracker(object):
 
         self.max_age = max_age
         self.memory_size = memory_size
-        self.min_similarity = -500
+        self.min_similarity = -2e4
 
         self.tracks = []
         self._next_id = 1
@@ -164,7 +164,7 @@ class RANTracker(object):
         matches, unmatched_tracks, unmatched_detections = self._match(bboxes)
 
         # update tracks
-        for track_idx, detection_idx in matches:
+        for detection_idx, track_idx in matches:
             self.tracks[track_idx].update(bboxes[detection_idx])
 
         # mark missed tracks
@@ -175,6 +175,17 @@ class RANTracker(object):
             self._init_track(bboxes[detection_idx])
 
         self.tracks = [t for t in self.tracks if not t.is_deleted()]
+
+    def get_tracks(self):
+        bbox_list = []
+        id_list = []
+        for track in self.tracks:
+            if not track.is_confirmed() or track.time_since_update > 1:
+                continue
+            bbox_list.append(track.prev_bbox)
+            id_list.append(track.track_id)
+
+        return bbox_list, id_list
 
     def _init_track(self, bbox, feature=None):
         self.tracks.append(RANTrack(bbox, self._next_id, self.ran_model, feature))
@@ -230,7 +241,7 @@ if __name__ == '__main__':
               hidden_size=32,
               history_size=10,
               drop_rate=0.5,
-              save_path=model_save_prefix)
+              save_prefix=model_save_prefix)
     load_model(ran)
     ran = ran.cuda()
     ran.eval()

@@ -29,7 +29,7 @@ def main(args):
     #     print('not implemented')
     #     exit()
 
-    mot16_root_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "MOT16"))
+    mot16_root_dir = '/scratch0/MOT/MOT16'
 
     train_dataset = MOT16_train_dataset(mot16_root_dir,
                                         val_id=7,
@@ -41,17 +41,12 @@ def main(args):
                                    num_workers=1,
                                    collate_fn=pad_packed_collate)
 
-    # model_save_dir = os.path.abspath(os.path.join(os.path.pardir, "Data", "ran"))
-    # m = RAN(input_size=4,
-    #         hidden_size=32,
-    #         history_size=10,
-    #         drop_rate=0.5,
-    #         save_path=model_save_dir)
-    #
-    # trainIters(m, train_data_loader, n_epoch=100)
+    model_prefix = '/scratch0/RAN/trained_model/ran'
+    m = RAN(input_size=4, hidden_size=32, history_size=10, drop_rate=0.5, save_prefix=model_prefix)
+    trainIters(m, train_data_loader, n_epoch=100)
 
     # load_model(m)
-    # save_model(m)
+    save_model(m)
 
 
 

@@ -48,8 +48,8 @@ def load_mot16_gt(data_root):
         # raw_gt['vis'] can be used to eliminate heavy occlusion
         raw_gt = raw_gt[raw_gt['conf'] == 1]
         # bbox x, y is the center pixel location
-        raw_gt['x'] += raw_gt['w'] / 2
-        raw_gt['y'] += raw_gt['h'] / 2
+        raw_gt['x'] += raw_gt['w'] / 2.
+        raw_gt['y'] += raw_gt['h'] / 2.
         raw_gt = _remove_field_name(raw_gt, ['conf'])
         gt.append(raw_gt)
     print('vid seq: ', mot_train_seq)
@@ -91,8 +91,8 @@ def load_mot16_det(data_root, mot_train_seq):
                                        ('d3', 'i4'),
                                        ('d4', 'i4')])
         raw_det = _remove_field_name(raw_det, ['d1', 'd2', 'd3', 'd4'])
-        raw_det['x'] += raw_det['w'] / 2
-        raw_det['y'] += raw_det['h'] / 2
+        raw_det['x'] += raw_det['w'] / 2.
+        raw_det['y'] += raw_det['h'] / 2.
         # raw_det = np.append([[i + 1]] * raw_det.shape[0],
         #                     raw_det, axis=1)
         det.append(raw_det)
@@ -420,23 +420,33 @@ def show_track(idx, data_set):
     videofig(len(img_files), redraw_fn, play_fps=30)
 
 
-def save_video(bboxes, img_files):
-    video = cv2.VideoWriter('video.avi', cv2.VideoWriter_fourcc(*"MJPG"), 1, (640, 480))
+colours = (np.random.rand(32, 3) * 512).astype(int)
+colours = [tuple(c) for c in colours]
 
-    for bbox, img in zip(bboxes, img_files):
-        frame = cv2.imread(img)
-        frame = cv2.resize(frame, (640, 480))
 
+def save_to_video(video_handle, img_file, img_size, bboxes, id_list):
+    """ Write a given frame to the video handle.
+    BBoxes in the frame are drawn with corresponding colors.
+
+
+    """
+
+    # automatically handles the case when bboxes = []
+    frame = cv2.imread(img_file)
+    selected_colors = [colours[int(i) % 32] for i in id_list]
+
+    for (bbox, color, track_id) in zip(bboxes, selected_colors, id_list):
         x1, y1, w1, h1 = bbox
-        x1 = int(x1 - w1 / 2)
-        y1 = int(y1 - h1 / 2)
+        x1 = int(x1 - w1 / 2.)
+        y1 = int(y1 - h1 / 2.)
         x2 = int(x1 + w1)
         y2 = int(y1 + h1)
 
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-        video.write(frame)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(frame, str(track_id), (x2, y2), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
 
-    video.release()
+    frame = cv2.resize(frame, img_size)
+    video_handle.write(frame)
 
     # # for f in frame_num:
     # img = None
