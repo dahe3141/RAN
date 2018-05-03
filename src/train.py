@@ -5,7 +5,7 @@ from torch.autograd import Variable
 import time
 from torch import optim
 import math
-from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence
+from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence, pack_padded_sequence
 import matplotlib.pyplot as plt
 import progressbar
 
@@ -64,24 +64,33 @@ def trainIters(model, dataloader, n_epoch, lr=0.001, betas=(0.9, 0.99), eps=1e-8
             # unpack sample
             packed_batch = sample  # PackedSequence
 
-            # pad batch to get lengths and generate external memory
+            # obtain a tensor (T, B, *) and lengths for sequences
             padded_batch, lengths = pad_packed_sequence(packed_batch)
-            ext = generate_external(padded_batch.data.numpy(),
+            lengths = [l-1 for l in lengths]
+
+            # generate two copies, one from 0 to L-2, the other from 1 to L-1
+            packed_input = pack_padded_sequence(padded_batch[:-1], lengths)
+            #packed_output = pack_padded_sequence(padded_batch[1:], lengths)
+
+            ext = generate_external(padded_batch.data.numpy()[:-1],
                                     lengths, model.history_size)
 
             # pytorch 0.31 does not support cuda() call for PackedSequence.
             # support will be added for pytorch 0.4
-            if use_cuda: packed_batch = PackedSequence(packed_batch.data.cuda(),
-                                                       packed_batch.batch_sizes)
+            if use_cuda:
+                packed_input = PackedSequence(packed_input.data.cuda(),
+                                              packed_input.batch_sizes)
 
             hidden = model.init_hidden(len(lengths))  # (1, B, hidden)
 
-            alpha, sigma, h_n = model(packed_batch, hidden)
+            alpha, sigma, h_n = model(packed_input, hidden)
 
             ext = Variable(t.from_numpy(ext), requires_grad=False)
-            if use_cuda: ext, padded_batch = ext.cuda(), padded_batch.cuda()
 
-            loss = loss_fn(alpha, sigma, padded_batch, ext, lengths)
+            if use_cuda:
+                ext, padded_batch = ext.cuda(), padded_batch.cuda()
+
+            loss = loss_fn(alpha, sigma, padded_batch[1:], ext, lengths)
             loss.backward()
             optimizer.step()
 

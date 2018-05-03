@@ -56,7 +56,10 @@ class MOT16_train_dataset(Dataset):
             if not os.path.exists(os.path.dirname(saved_path)):
                 os.makedirs(os.path.dirname(saved_path))
 
+            # gt annotation
             self.gt, self.mot_train_seq = load_mot16_gt(self.root)
+
+            # detection file
             self.det = load_mot16_det(self.root, self.mot_train_seq)
             train_samples, img_id = \
                 generate_training_samples(self.det, self.gt)

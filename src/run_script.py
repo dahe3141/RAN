@@ -37,7 +37,7 @@ def main(args):
 
     train_data_loader = DataLoader(train_dataset,
                                    batch_size=64,
-                                   shuffle=True,
+                                   shuffle=False,
                                    num_workers=1,
                                    collate_fn=pad_packed_collate)
 

@@ -5,6 +5,7 @@ from utils import save_to_video
 from models import RAN, load_model
 from trackers import RANTracker
 
+
 def gather_sequence_info(sequence_dir, detection_file):
     """Gather sequence information
         (1) image filenames
@@ -125,7 +126,7 @@ if __name__ == '__main__':
 
     seq_info = gather_sequence_info('/scratch0/MOT/MOT16/train/MOT16-02', '/scratch0/MOT/MOT16/external/MOT16-02_det.txt')
 
-    video = cv2.VideoWriter('../results/video_det.avi', cv2.VideoWriter_fourcc(*"MJPG"), seq_info['fps'], (640, 480))
+    video = cv2.VideoWriter('../results/video_gt.avi', cv2.VideoWriter_fourcc(*"MJPG"), seq_info['fps'], (640, 480))
 
     model_save_prefix = "/scratch0/RAN/trained_model/ran"
     # load model
@@ -140,8 +141,8 @@ if __name__ == '__main__':
     tracker = RANTracker(ran)
 
     for frame_idx in seq_info['image_filenames'].keys():
-        #bboxes, confs = create_detections(seq_info['groundtruth'], frame_idx)
-        bboxes, confs = create_detections(seq_info['detections'], frame_idx)
+        bboxes, confs = create_detections(seq_info['groundtruth'], frame_idx)
+        #bboxes, confs = create_detections(seq_info['detections'], frame_idx)
 
         # filter detections
         bboxes = [bbox for (bbox, conf) in zip(bboxes, confs) if conf > 0.7]
@@ -154,7 +155,6 @@ if __name__ == '__main__':
 
         # write to video
         filename = seq_info['image_filenames'][frame_idx]
-        #save_to_video(video, filename, (640, 480), bboxes, [(255, 0, 0)] * len(bboxes))
         save_to_video(video, filename, (640, 480), track_list, id_list)
 
     video.release()

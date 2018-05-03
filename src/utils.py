@@ -10,6 +10,7 @@ import cv2
 mot16_train_seq = ['MOT16-13', 'MOT16-11', 'MOT16-10',
                  'MOT16-09', 'MOT16-05', 'MOT16-04', 'MOT16-02']
 
+
 def load_mot16_gt(data_root):
     """Parse MOT16 ground truth data
     Args:
@@ -73,8 +74,7 @@ def load_mot16_det(data_root, mot_train_seq):
     Note:
         The x,y coord returned for bbox is the center pixel location.
     """
-    mot_train_seq_det_fn = [os.path.join(data_root, 'train', seq, 'det',
-                                 'det.txt') for seq in mot_train_seq]
+    mot_train_seq_det_fn = [os.path.join(data_root, 'train', seq, 'det', 'det.txt') for seq in mot_train_seq]
     det = []
     mask_col = np.ones(10, dtype=bool)
     mask_col[[1, 7, 8, 9]] = False
@@ -167,7 +167,7 @@ def iou(gt_bbox, det_bboxs):
     return det_bboxs[iou_idx]
 
 
-def generate_training_samples(det_all, gt_all, min_len=20, gt_only=False):
+def generate_training_samples(det_all, gt_all, min_len=20, gt_only=True):
     """Generate training trajectories for all videos
 
     Args:
