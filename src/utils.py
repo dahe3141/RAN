@@ -5,6 +5,7 @@ import matplotlib.patches as patches
 from videofig import videofig
 from scipy.misc import imread
 from matplotlib.pyplot import Rectangle, Text
+from sklearn.utils.linear_assignment_ import linear_assignment
 import cv2
 
 mot16_train_seq = ['MOT16-13', 'MOT16-11', 'MOT16-10',
@@ -19,7 +20,7 @@ def load_mot16_gt(data_root):
     Returns:
         gt (list): list of trajectories. One np array for each video.
             One frame per row. [frame_num \ track_id \ x, y, w, h \ class \ vis]
-        mot_train_seq (list): video names as indexed by vid_id - 1
+        mot_train_seq (list): video names
 
     expecting files in the following format:
         <frame_num>,<track_id>,<x>,<y>,<w>,<h>,<conf>,<class>,<vis>
@@ -28,42 +29,36 @@ def load_mot16_gt(data_root):
     """
     # pre-defined mot_train_seq
     mot_train_seq = mot16_train_seq
-    # mot_train_seq = os.listdir(os.path.join(data_root, 'train'))
-    # mot_train_seq = [f for f in mot_train_seq if not f.startswith('.')]
-    mot_train_seq_gt_fn = [os.path.join(data_root, 'train', seq, 'gt',
-                                    'gt.txt') for seq in mot_train_seq]
+    sequence_dir_list = [os.path.join(data_root, 'train', seq) for seq in mot_train_seq]
     gt = []
-    for i, gt_fn in enumerate(mot_train_seq_gt_fn):
-        raw_gt = np.genfromtxt(gt_fn, delimiter=',',
-                               dtype=[('frame_num', 'i4'),
-                                      ('track_id', 'i4'),
-                                      ('x', 'f4'),
-                                      ('y', 'f4'),
-                                      ('w', 'f4'),
-                                      ('h', 'f4'),
-                                      ('conf', 'i4'),
-                                      ('class', 'i4'),
-                                      ('vis', 'f4')])
-        # we should consider what to be included for training
-        # raw_gt['class'] include distractors
-        # raw_gt['vis'] can be used to eliminate heavy occlusion
-        raw_gt = raw_gt[raw_gt['conf'] == 1]
-        # bbox x, y is the center pixel location
-        raw_gt['x'] += raw_gt['w'] / 2.
-        raw_gt['y'] += raw_gt['h'] / 2.
-        raw_gt = _remove_field_name(raw_gt, ['conf'])
-        gt.append(raw_gt)
-    print('vid seq: ', mot_train_seq)
+    image_info = []
+    for i, sequence_dir in enumerate(sequence_dir_list):
+        gt_fn = os.path.join(sequence_dir, 'gt/gt.txt')
+        image_dir = os.path.join(sequence_dir, 'img1')
+        image_filenames = {
+            int(os.path.splitext(f)[0]): os.path.join(image_dir, f)
+            for f in os.listdir(image_dir)}
 
-    return gt, mot_train_seq
+        raw_gt = np.genfromtxt(gt_fn, delimiter=',', dtype=np.float32)
+        raw_gt = raw_gt[raw_gt[:, 6] == 1]
+        raw_gt = raw_gt[raw_gt[:, 8] > 0.5]
+        seq_info = {
+            'frame_num': raw_gt[:, 0],
+            'track_id': raw_gt[:, 1],
+            'bbox': raw_gt[:, 2:6],
+            'vis': raw_gt[:, 8]
+        }
+
+        gt.append(seq_info)
+        image_info.append(image_filenames)
+
+    return gt, image_info
 
 
-def load_mot16_det(data_root, mot_train_seq):
+def load_mot16_det(det_file_list, feat_file_list=None):
     """Parse MOT16 detection data
     Args:
-        data_root (str): path MOT16 folder
-        mot_train_seq (list): list of video files. This is used to process video
-            in the same order as ground truth
+        det_file_list (str)
     Returns:
         det (list): list of detections. One structured np array for each video.
             one detection per row. [frame_num | x, y, w, h | score]
@@ -74,47 +69,143 @@ def load_mot16_det(data_root, mot_train_seq):
     Note:
         The x,y coord returned for bbox is the center pixel location.
     """
-    mot_train_seq_det_fn = [os.path.join(data_root, 'train', seq, 'det', 'det.txt') for seq in mot_train_seq]
+
     det = []
-    mask_col = np.ones(10, dtype=bool)
-    mask_col[[1, 7, 8, 9]] = False
-    for i, det_fn in enumerate(mot_train_seq_det_fn):
-        raw_det = np.genfromtxt(det_fn, delimiter=',',
-                                dtype=[('frame_num', 'i4'),
-                                       ('d1', 'i4'),
-                                       ('x', 'f4'),
-                                       ('y', 'f4'),
-                                       ('w', 'f4'),
-                                       ('h', 'f4'),
-                                       ('score', 'f4'),
-                                       ('d2', 'i4'),
-                                       ('d3', 'i4'),
-                                       ('d4', 'i4')])
-        raw_det = _remove_field_name(raw_det, ['d1', 'd2', 'd3', 'd4'])
-        raw_det['x'] += raw_det['w'] / 2.
-        raw_det['y'] += raw_det['h'] / 2.
-        # raw_det = np.append([[i + 1]] * raw_det.shape[0],
-        #                     raw_det, axis=1)
-        det.append(raw_det)
+    for i, det_fn in enumerate(det_file_list):
+        raw_det = np.genfromtxt(det_fn, delimiter=',', dtype=np.float32)
+        mask = raw_det[:, 6] > 0.7
+        raw_det = raw_det[mask]
+
+        if feat_file_list is not None:
+            raw_feat = np.genfromtxt(feat_file_list[i], delimiter=',', dtype=np.float32)
+            raw_feat = raw_feat[mask]
+        else:
+            raw_feat = np.empty((len(raw_det), 4)) * np.nan
+
+        seq_info = {
+            'frame_num': raw_det[:, 0],
+            'bbox': raw_det[:, 2:6],
+            'score': raw_det[:, 6],
+            'feat': raw_feat
+        }
+
+        det.append(seq_info)
+
     return det
 
 
-def _remove_field_name(a, name):
-    """
-    Delete named filed in structured array.
-    Args:
-        a (structured np array):
-        name (list): list of field name  s to be removed from a
-    Returns:
-        structured array with corresponding fields removed
-    """
-    names = [n for n in list(a.dtype.names) if not (n in name)]
-    return a[names]
+def iou_vec(boxes1, boxes2):
+    x11, y11, x12, y12 = np.split(boxes1, 4, axis=1)
+    x21, y21, x22, y22 = np.split(boxes2, 4, axis=1)
+    xA = np.maximum(x11, np.transpose(x21))
+    yA = np.maximum(y11, np.transpose(y21))
+    xB = np.minimum(x12, np.transpose(x22))
+    yB = np.minimum(y12, np.transpose(y22))
+    interArea = np.maximum(xB - xA, 0) * np.maximum(yB - yA, 0)
+    boxAArea = (x12 - x11) * (y12 - y11)
+    boxBArea = (x22 - x21) * (y22 - y21)
+    iou = interArea / (boxAArea + np.transpose(boxBArea) - interArea)
+    return iou
 
 
-def _print_train_sample_len(train_samples, mot_train_seq):
-    for name, vid in zip(mot_train_seq, train_samples):
-        print(name, [len(a) for a in vid])
+def hungarian_match(gt_bboxes, det_bboxes):
+    iou = iou_vec(gt_bboxes, det_bboxes)
+    matched_indices = linear_assignment(-iou)
+    matches, unmatched_gts, unmatched_dets = [], [], []
+    gt_matched, det_matched = [], []
+
+    for g, _ in enumerate(gt_bboxes):
+        if g not in matched_indices[:, 0]:
+            unmatched_gts.append(g)
+
+    for d, _ in enumerate(det_bboxes):
+        if d not in matched_indices[:, 1]:
+            unmatched_dets.append(d)
+
+    for g, d in matched_indices:
+        if iou[g, d] < 0.2:
+            unmatched_gts.append(g)
+            unmatched_dets.append(d)
+        else:
+            matches.append((g, d))
+            gt_matched.append(g)
+            det_matched.append(d)
+
+    return matches, np.array(gt_matched), np.array(det_matched)
+
+
+def match_detections(gt_all, det_all):
+    """
+    Parameters:
+        gt_all (list): A list of ndarray groundtruth annotation
+        det_all (list): A list of ndarray detections
+
+    Return:
+        gt_indices_all (list)
+        det_indices_all (list): A list of ndarray indices
+    """
+
+    refined_detection = []
+
+    for gt, det in zip(gt_all, det_all):
+        frame_num_list = np.unique(gt['frame_num'])
+
+        frame_num_refined = []
+        track_id_refined = []
+        bbox_refined = []
+        score_refined = []
+        feat_refined = []
+
+        for t in frame_num_list:
+            gt_select = np.where(gt['frame_num'] == t)[0]
+            det_select = np.where(det['frame_num'] == t)[0]
+
+            gt_bboxes = gt['bbox'][gt_select].copy()
+            det_bboxes = det['bbox'][det_select].copy()
+            # convert to (x1 y1 x2 y2)
+            gt_bboxes[:, 2:4] += gt_bboxes[:, 0:2]
+            det_bboxes[:, 2:4] += det_bboxes[:, 0:2]
+
+            matches, gt_matched, det_matched = hungarian_match(gt_bboxes, det_bboxes)
+
+            if len(gt_matched) > 0:
+                gt_indices = gt_select[gt_matched]
+                det_indices = det_select[det_matched]
+                frame_num_refined.append(gt['frame_num'][gt_indices])
+                track_id_refined.append(gt['track_id'][gt_indices])
+                bbox_refined.append(det['bbox'][det_indices])
+                score_refined.append(det['score'][det_indices])
+                feat_refined.append(det['feat'][det_indices])
+
+        seq_info = {
+            'frame_num': np.concatenate(frame_num_refined),
+            'track_id': np.concatenate(track_id_refined),
+            'bbox': np.concatenate(bbox_refined),
+            'score': np.concatenate(score_refined),
+            'feat': np.concatenate(feat_refined)
+        }
+
+        refined_detection.append(seq_info)
+
+    return refined_detection
+
+
+def ind_select(source, indices, field_name):
+    """
+    Parameters:
+        source: A list of dictionary
+        indices: A list of ndarray indicating which rows to select
+        field_name: selected field_name of the dictionary
+    """
+
+    result = []
+    for src, ind in zip(source, indices):
+        if src[field_name] is None:
+            result.append(None)
+        else:
+            result.append(src[field_name][ind].copy())
+
+    return result
 
 
 def iou(gt_bbox, det_bboxs):
@@ -167,14 +258,43 @@ def iou(gt_bbox, det_bboxs):
     return det_bboxs[iou_idx]
 
 
+def generate_trainset(det_all, min_len=20):
+
+    motion = []
+    appearance = []
+    video_id = []
+    frame_num = []
+
+    for i, det in enumerate(det_all):
+        unique_id = np.unique(det['track_id'])
+
+        for t in unique_id:
+            select = np.where(det['track_id'] == t)
+
+            if len(select) > min_len:
+                bb = det['bbox'][select].copy()
+                # x,y,w,h to cx,cy,w,h
+                bb[:, 0:2] += bb[:, 2:4] / 2.0
+                motion.append(bb)
+
+                if det['feat'] is not None:
+                    f = det['feat'][select].copy()
+                    appearance.append(f)
+
+                video_id.append([i] * len(select))
+                frame_num.append(det['frame_num'][select])
+
+    return motion, appearance, video_id, frame_num
+
+
 def generate_training_samples(det_all, gt_all, min_len=20, gt_only=True):
     """Generate training trajectories for all videos
 
     Args:
-        det (list): list of detections for each video.
+        det_all (list): list of detections for each video.
             each vid is represented with np array: one detection per row.
             (n, 5) [frame_num, bbox, score]
-        gt (list): list of trajectories for each video.
+        gt_all (list): list of trajectories for each video.
             each trajectory is represented by a np array.
             (n, 6) [frame_num, track_id, x, y, w, h]
 
@@ -247,11 +367,6 @@ def generate_training_samples(det_all, gt_all, min_len=20, gt_only=True):
 
         c.append(cc)
 
-    # print(c)
-    # a = np.array([11450, 17833, 6818, 47557, 12318, 9174, 5257])
-    # print(c/a)
-    # _print_train_sample_len(train_samples, mot_train_seq)
-
     # Note: I decide to drop the vid index and mix all tracks
     return train_samples, img_id_train_samples
 
@@ -272,7 +387,7 @@ def uniform_sample_bbox(bboxs):
         return bboxs[np.random.choice(bboxs.shape[0]), :]
 
 
-def generate_external(padded_batch,  lengths, hist_size):
+def generate_external(padded_batch, lengths, hist_size):
     """
     Helper function for pad_packed_collate
     generate external memory of the given a padded batch for training.
@@ -420,14 +535,13 @@ def show_track(idx, data_set):
     videofig(len(img_files), redraw_fn, play_fps=30)
 
 
-colours = (np.random.rand(32, 3) * 512).astype(int)
-colours = [tuple(c) for c in colours]
+colours = np.random.rand(32, 3) * 512
+colours = [(int(c[0]), int(c[1]), int(c[2])) for c in colours]
 
 
 def save_to_video(video_handle, img_file, img_size, bboxes, id_list):
     """ Write a given frame to the video handle.
-    BBoxes in the frame are drawn with corresponding colors.
-
+    BBoxes should be in the format (x, y, w, h).
 
     """
 
@@ -436,11 +550,11 @@ def save_to_video(video_handle, img_file, img_size, bboxes, id_list):
     selected_colors = [colours[int(i) % 32] for i in id_list]
 
     for (bbox, color, track_id) in zip(bboxes, selected_colors, id_list):
-        x1, y1, w1, h1 = bbox
-        x1 = int(x1 - w1 / 2.)
-        y1 = int(y1 - h1 / 2.)
-        x2 = int(x1 + w1)
-        y2 = int(y1 + h1)
+        x, y, w, h = bbox
+        x1 = int(x)
+        y1 = int(y)
+        x2 = int(x1 + w)
+        y2 = int(y1 + h)
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         cv2.putText(frame, str(track_id), (x2, y2), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)

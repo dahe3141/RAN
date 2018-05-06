@@ -7,17 +7,13 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 
 
-from utils import load_mot16_det, load_mot16_gt, generate_training_samples, generate_img_fn
+from utils import load_mot16_det, load_mot16_gt, generate_trainset, match_detections, ind_select
 import pickle
 import matplotlib.pyplot as plt
 from torch.nn.utils.rnn import pack_padded_sequence as pack, pad_packed_sequence as unpack
 from torch.autograd import Variable
 
 
-# TODO: validation set can be handeled with sampler. Dataset need to generate
-# TODO: all data.
-
-# TODO: random selection in IOU is saved in disk.
 class MOT16_train_dataset(Dataset):
     """ MOT16 dataset.
 
@@ -33,76 +29,60 @@ class MOT16_train_dataset(Dataset):
     """
     processed_folder = 'processed'
     training_file = 'train.pt'
+    sequence = ['MOT16-13', 'MOT16-11', 'MOT16-10',
+                'MOT16-09', 'MOT16-05', 'MOT16-04', 'MOT16-02']
 
-    def __init__(self, root, val_id=7, trans_func=None, overwrite=False, train_flag=True):
+    def __init__(self, root, det_dir):
 
         self.root = os.path.expanduser(root)
-        self.val_id = val_id
-        self.trans_func = trans_func
-        self.train = train_flag
+        self.det_dir = os.path.expanduser(det_dir)
+        self.saved_path = os.path.join(self.root, self.processed_folder, self.training_file)
 
-        saved_path = os.path.join(self.root, self.processed_folder, self.training_file)
+        if os.path.exists(self.saved_path):
+            print("Loading data from {}".format(self.saved_path))
+            self._load(self.saved_path)
 
-        if overwrite and os.path.exists(saved_path):
-            os.remove(saved_path)
-
-        if os.path.exists(saved_path):
-            print("loading saved data from {}".format(saved_path))
-            with open(saved_path, 'rb') as f:
-                train_samples, img_id, self.mot_train_seq, self.gt,\
-                    self.det = pickle.load(f)
         else:
-            print('generating data and saving to {}'.format(saved_path))
-            if not os.path.exists(os.path.dirname(saved_path)):
-                os.makedirs(os.path.dirname(saved_path))
-
-            # gt annotation
-            self.gt, self.mot_train_seq = load_mot16_gt(self.root)
-
-            # detection file
-            self.det = load_mot16_det(self.root, self.mot_train_seq)
-            train_samples, img_id = \
-                generate_training_samples(self.det, self.gt)
-
-            with open(saved_path, 'wb+') as f:
-                pickle.dump((train_samples, img_id,
-                             self.mot_train_seq, self.gt, self.det), f)
-
-        temp = [(s, i) for s, i in zip(train_samples, img_id)
-                if not i[0, 0] == val_id - 1]
-        self.train_samples, self.img_id = tuple(zip(*temp))
-        temp = [(s, i) for s, i in zip(train_samples, img_id)
-                if i[0, 0] == val_id - 1]
-        self.val_samples, self.val_img_id = tuple(zip(*temp))
-        print("there are {} training samples and {} validation samples"
-              .format(len(self.train_samples), len(self.val_samples)))
+            if not os.path.exists(os.path.dirname(self.saved_path)):
+                os.makedirs(os.path.dirname(self.saved_path))
+            print('Generating data and saving to {}'.format(self.saved_path))
 
     def __len__(self):
-        if self.train:
-            return len(self.train_samples)
-        else:
-            return len(self.val_samples)
+        return len(self.motion)
 
     def __getitem__(self, idx):
-        """
-        Currently just return a trajectory
-        Args:
-            idx (int):
-        Returns:
-            sample (ndarray): (n, 4)
-        """
-        # img_name = generate_img_fn(self.root, self.mot_train_seq, self.img_id[idx])
-        # # img_ic = io.imread_collection(img_name, conserve_memory=True, plugin=None)
-        #
-        # sample = (img_name, self.train_samples[idx])
-        #
-        # if self.trans_func:
-        #     sample = self.trans_func(sample)
+        return self.motion[idx], self.appearance[idx]
 
-        if self.train:
-            return self.train_samples[idx]
-        else:
-            return self.val_samples[idx]
+    def _process(self):
+        # gt annotation
+        gt_all, image_filenames = load_mot16_gt(self.root)
+
+        # detection files
+        det_files = [os.path.join(self.det_dir, '{}_det.txt'.format(x)) for x in self.sequence]
+        feat_files = [os.path.join(self.det_dir, '{}_feat.txt'.format(x)) for x in self.sequence]
+
+        det_all = load_mot16_det(det_files, feat_files)
+
+        gt_indices, det_indices = match_detections(gt_all, det_all)
+
+        det_refined = {
+            'frame_num': ind_select(gt_all, gt_indices, 'frame_num'),
+            'track_id': ind_select(gt_all, gt_indices, 'track_id'),
+            'bbox': ind_select(det_all, det_indices, 'bbox'),
+            'score': ind_select(det_all, det_indices, 'score'),
+            'feat': ind_select(det_all, det_indices, 'feat')
+        }
+
+        motion, appearance, video_id, frame_num = generate_trainset(det_refined)
+
+        with open(self.saved_path, 'wb+') as f:
+            pickle.dump((motion, appearance, video_id, frame_num,
+                         gt_all, det_all, image_filenames), f)
+
+    def _load(self, saved_path):
+        with open(saved_path, 'rb') as f:
+            self.motion, self.appearance, self.video_id, self.frame_num, \
+                self.gt_all, self.det_all, self.image_filenames = pickle.load(f)
 
 
 # collate_fn([dataset[i] for i in batch_indices])
@@ -111,7 +91,9 @@ def pad_packed_collate(batch, hist_size=10):
        the packed_padded_sequence and the labels. Set use_lengths to True
        to use this collate function.
        Args:
-            batch (list): list of ndarray (n, feat), length is batch size
+            batch (list): list of ndarray (n, feat)
+                len(batch) is the size of the batch
+                n is the number of features
        Output:
             packed_batch (PackedSequence): (T, B, F)
             packed_ext (PackedSequence): (T, B, F, H)
