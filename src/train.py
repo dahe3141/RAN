@@ -12,6 +12,9 @@ import progressbar
 use_cuda = t.cuda.is_available()
 
 
+# TODO: write trainer class, and read protocol in deep sort, maybe motion model should not be used under occlusion
+
+
 def loss_fn(alpha, sigma, x, ext, lengths):
     """
     compute negative log likelihood probability of new observation x
@@ -45,18 +48,21 @@ def loss_fn(alpha, sigma, x, ext, lengths):
 
 
 def trainIters(model, dataloader, n_epoch, lr=0.001, betas=(0.9, 0.99), eps=1e-8):
-    if use_cuda: model = model.cuda()
+    if use_cuda:
+        model = model.cuda()
+
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas, eps=eps)
 
     total_loss = []
-    i=0
+    i = 0
     # progressbar setting
     widgets = ['Training epoch ', progressbar.Counter(), progressbar.Percentage(),
                ' ', progressbar.Bar(), ' ', progressbar.ETA()]
     bar = progressbar.ProgressBar(widgets=widgets, max_value=n_epoch)
+
     for e in bar(range(n_epoch)):
 
-        for sample in dataloader:
+        for sample, _ in dataloader:
             i += 1
             model.train()
             optimizer.zero_grad()

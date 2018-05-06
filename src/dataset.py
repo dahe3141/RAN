@@ -10,8 +10,9 @@ from torchvision import transforms, utils
 from utils import load_mot16_det, load_mot16_gt, generate_trainset, match_detections, ind_select
 import pickle
 import matplotlib.pyplot as plt
-from torch.nn.utils.rnn import pack_padded_sequence as pack, pad_packed_sequence as unpack
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.autograd import Variable
+import collections
 
 
 class MOT16_train_dataset(Dataset):
@@ -46,6 +47,8 @@ class MOT16_train_dataset(Dataset):
             if not os.path.exists(os.path.dirname(self.saved_path)):
                 os.makedirs(os.path.dirname(self.saved_path))
             print('Generating data and saving to {}'.format(self.saved_path))
+            self._process()
+            self._load(self.saved_path)
 
     def __len__(self):
         return len(self.motion)
@@ -62,31 +65,20 @@ class MOT16_train_dataset(Dataset):
         feat_files = [os.path.join(self.det_dir, '{}_feat.txt'.format(x)) for x in self.sequence]
 
         det_all = load_mot16_det(det_files, feat_files)
-
-        gt_indices, det_indices = match_detections(gt_all, det_all)
-
-        det_refined = {
-            'frame_num': ind_select(gt_all, gt_indices, 'frame_num'),
-            'track_id': ind_select(gt_all, gt_indices, 'track_id'),
-            'bbox': ind_select(det_all, det_indices, 'bbox'),
-            'score': ind_select(det_all, det_indices, 'score'),
-            'feat': ind_select(det_all, det_indices, 'feat')
-        }
-
-        motion, appearance, video_id, frame_num = generate_trainset(det_refined)
+        det_refined = match_detections(gt_all, det_all)
+        bbox, motion, appearance, video_id, frame_num = generate_trainset(det_refined)
 
         with open(self.saved_path, 'wb+') as f:
-            pickle.dump((motion, appearance, video_id, frame_num,
-                         gt_all, det_all, image_filenames), f)
+            pickle.dump((bbox, motion, appearance, video_id, frame_num, image_filenames), f)
 
     def _load(self, saved_path):
         with open(saved_path, 'rb') as f:
-            self.motion, self.appearance, self.video_id, self.frame_num, \
-                self.gt_all, self.det_all, self.image_filenames = pickle.load(f)
+            self.bbox, self.motion, self.appearance, self.video_id, self.frame_num, \
+                self.image_filenames = pickle.load(f)
 
 
 # collate_fn([dataset[i] for i in batch_indices])
-def pad_packed_collate(batch, hist_size=10):
+def pad_packed_collate(batch):
     """Puts data, and lengths into a packed_padded_sequence then returns
        the packed_padded_sequence and the labels. Set use_lengths to True
        to use this collate function.
@@ -101,6 +93,12 @@ def pad_packed_collate(batch, hist_size=10):
         Note: the dataloader does not know history size which is an attribute of
             The model. It may not be appropriate to generate external here.
     """
+    if isinstance(batch[0], np.ndarray):
+        pass
+    elif isinstance(batch[0], collections.Sequence):
+        transposed = zip(*batch)
+        return [pad_packed_collate(samples) for samples in transposed]
+
     # pad sequence as TxBx*
     # T is length[0] longest seq, B is batch, * is feature
     # length and padded is sorted in descending order
@@ -124,10 +122,26 @@ def pad_packed_collate(batch, hist_size=10):
         padded_batch = np.stack(padded_batch, axis=1)
 
     # pack
-    packed_batch = pack(Variable(t.from_numpy(padded_batch)), lengths,
+    packed_batch = pack_padded_sequence(Variable(t.from_numpy(padded_batch)), lengths,
                         batch_first=False)
 
     return packed_batch
+
+
+if __name__ == '__main__':
+    dataset = MOT16_train_dataset('/scratch0/MOT/MOT16', '/scratch0/MOT/MOT16/external')
+    dl = DataLoader(dataset, batch_size=3, shuffle=False, num_workers=1, collate_fn=pad_packed_collate)
+
+    m, _ = dataset[0]
+    print(m[5])
+    print(dataset.bbox[0][5] - dataset.bbox[0][4])
+
+    train_iter = iter(dl)
+    m, a = next(train_iter)
+
+    mm = pad_packed_sequence(m)
+    print(m)
+    print(a)
 
 
 

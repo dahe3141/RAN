@@ -260,6 +260,7 @@ def iou(gt_bbox, det_bboxs):
 
 def generate_trainset(det_all, min_len=20):
 
+    bboxes = []
     motion = []
     appearance = []
     video_id = []
@@ -268,23 +269,28 @@ def generate_trainset(det_all, min_len=20):
     for i, det in enumerate(det_all):
         unique_id = np.unique(det['track_id'])
 
+        # iterate over tracks
         for t in unique_id:
-            select = np.where(det['track_id'] == t)
+            select = np.where(det['track_id'] == t)[0]
 
             if len(select) > min_len:
                 bb = det['bbox'][select].copy()
-                # x,y,w,h to cx,cy,w,h
+                # convert to cx,cy,w,h
                 bb[:, 0:2] += bb[:, 2:4] / 2.0
-                motion.append(bb)
+                bboxes.append(bb)
 
-                if det['feat'] is not None:
-                    f = det['feat'][select].copy()
-                    appearance.append(f)
+                m = bb.copy()
+                m[1:, :] -= m[0:-1, :]
+                m[0, :] = 0
+                motion.append(m)
+
+                f = det['feat'][select].copy()
+                appearance.append(f)
 
                 video_id.append([i] * len(select))
                 frame_num.append(det['frame_num'][select])
 
-    return motion, appearance, video_id, frame_num
+    return bboxes, motion, appearance, video_id, frame_num
 
 
 def generate_training_samples(det_all, gt_all, min_len=20, gt_only=True):
