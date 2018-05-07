@@ -12,7 +12,84 @@ import progressbar
 use_cuda = t.cuda.is_available()
 
 
-# TODO: write trainer class, and read protocol in deep sort, maybe motion model should not be used under occlusion
+class Trainer(object):
+    def __init__(self, opt, motion_dim, feat_dim, dataloader):
+
+        self.opt = opt
+        self.RAN_motion = RAN(input_size=motion_dim, hidden_size=32, history_size=10, drop_rate=0.5)
+        self.RAN_feat = RAN(input_size=feat_dim, hidden_size=32, history_size=10, drop_rate=0.5)
+
+        self.dataloader = dataloader
+
+        if self.opt.use_cuda:
+            self.RAN_motion.cuda()
+            self.RAN_feat.cuda()
+
+        self.optimizer_motion = optim.Adam(self.RAN_motion.parameters(), lr=1e-4, betas=(0.9, 0.99))
+        self.optimizer_appearance = optim.Adam(self.RAN_feat.parameters(), lr=1e-4, betas=(0.9, 0.99))
+
+    def train(self):
+        self.RAN_motion.train()
+        self.RAN_feat.train()
+
+        total_loss = []
+        curr_iters = 0
+
+        for epoch in range(self.opt.nepoch):
+
+            for i, (motion_data, feat_data) in enumerate(self.dataloader):
+                curr_iters += 1
+
+                ########
+                # Train motion model
+                ########
+                self.RAN_motion.zero_grad()
+                padded_batch, lengths, packed_input, ext = self.prepare_data(motion_data)
+
+                hidden = self.RAN_motion.init_hidden(len(lengths))  # (1, B, hidden)
+
+                alpha, sigma, h_n = self.RAN_motion(packed_input, hidden)
+
+                loss = loss_fn(alpha, sigma, padded_batch[1:], ext, lengths)
+                loss.backward()
+                self.optimizer_motion.step()
+
+                ########
+                # Train appearance model
+                ########
+                self.RAN_feat.zero_grad()
+                padded_batch, lengths, packed_input, ext = self.prepare_data(feat_data)
+
+                hidden = self.RAN_feat.init_hidden(len(lengths))  # (1, B, hidden)
+
+                alpha, sigma, h_n = self.RAN_feat(packed_input, hidden)
+
+                loss = loss_fn(alpha, sigma, padded_batch[1:], ext, lengths)
+                loss.backward()
+                self.optimizer_feat.step()
+
+                if i == 1:
+                    print('Epoch: {}, Loss: {}'.format(epoch, loss.data))
+
+    def prepare_data(self, batch_data):
+        # obtain a tensor (max_length, batch_size, feat_dim) and lengths for sequences
+        padded_batch, lengths = pad_packed_sequence(batch_data)
+        lengths = [l - 1 for l in lengths]
+
+        ext = generate_external(padded_batch.data.numpy()[:-1],
+                                lengths, self.opt.history_size)
+        ext = Variable(t.from_numpy(ext), requires_grad=False)
+
+        # generate input from t=0 to t=L-2
+        packed_input = pack_padded_sequence(padded_batch[:-1], lengths)
+
+        if self.opt.use_cuda:
+            ext = ext.cuda()
+            padded_batch = padded_batch.cuda()
+            packed_input = PackedSequence(packed_input.data.cuda(),
+                                          packed_input.batch_sizes)
+
+        return padded_batch, lengths, packed_input, ext
 
 
 def loss_fn(alpha, sigma, x, ext, lengths):
