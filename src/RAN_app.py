@@ -1,8 +1,9 @@
 import os
 import numpy as np
 import cv2
+import torch
 from utils import save_to_video
-from models import RAN, load_model
+from models import RAN
 from trackers import RANTracker
 
 
@@ -128,16 +129,19 @@ if __name__ == '__main__':
 
     video = cv2.VideoWriter('../results/video_gt.avi', cv2.VideoWriter_fourcc(*"MJPG"), seq_info['fps'], (640, 480))
 
-    model_save_prefix = "/scratch0/RAN/trained_model/ran"
+    model_path = "../results/models/RAN.pth"
     # load model
-    ran = RAN(input_size=4,
-              hidden_size=32,
-              history_size=10,
-              drop_rate=0.5,
-              save_prefix=model_save_prefix)
-    load_model(ran)
-    ran = ran.cuda()
-    ran.eval()
+    checkpoint = torch.load(model_path)
+    RAN_motion = RAN(input_size=4, hidden_size=32, history_size=10, drop_rate=0.5)
+    RAN_feat = RAN(input_size=4, hidden_size=32, history_size=10, drop_rate=0.5)
+
+    RAN_motion.load_state_dict(checkpoint['RAN_motion'])
+    RAN_feat.load_state_dict(checkpoint['RAN_feat'])
+    RAN_motion = RAN_motion.cuda()
+    RAN_feat = RAN_feat.cuda()
+
+    RAN_motion.eval()
+    RAN_feat.eval()
     tracker = RANTracker(ran)
 
     for frame_idx in seq_info['image_filenames'].keys():

@@ -29,7 +29,7 @@ class TrackState(object):
 
 
 class RANTrack(object):
-    def __init__(self, bbox, track_id, ran_model, feature=None, n_init=3, max_age=10):
+    def __init__(self, bbox, track_id, motion_model, feature=None, feat_model=None, n_init=3, max_age=10):
         self.track_id = track_id
         self.age = 1
         self.hits = 1
@@ -48,23 +48,19 @@ class RANTrack(object):
         #
         # mean of the AR model will be estimated through linear combination
 
-        memory_size = ran_model.history_size
-        input_size = ran_model.input_size
+        memory_size = motion_model.history_size
 
-        self.model = ran_model
-        self.h_motion = ran_model.init_hidden(batch_size=1)
-        self.h_feature = 0
+        motion_dim = motion_model.input_size
+        feat_dim = feat_model.input_size
 
-        # RAN outputs
-        self.alpha_motion = np.zeros(memory_size, dtype=np.float32)
-        self.sigma_motion = np.ones(input_size, dtype=np.float32)
-
-        # predicted mean vector from the AR model
-        self.mu_motion = np.zeros(input_size, dtype=np.float32)
+        self.motion_model = motion_model
+        self.feat_model = feat_model
+        self.h_motion = motion_model.init_hidden(batch_size=1)
+        self.h_feat = feat_model.init_hidden(batch_size=1)
 
         # external memory
-        self.external_motion = deque([np.zeros(input_size, dtype=np.float32) for _ in range(memory_size)], maxlen=memory_size)
-        self.external_feature = deque([np.zeros(input_size, dtype=np.float32) for _ in range(memory_size)], maxlen=memory_size)
+        self.external_motion = deque([np.zeros(motion_dim, dtype=np.float32) for _ in range(memory_size)], maxlen=memory_size)
+        self.external_feat = deque([np.zeros(feat_dim, dtype=np.float32) for _ in range(memory_size)], maxlen=memory_size)
 
         self.update(bbox, feature)
 
@@ -84,7 +80,7 @@ class RANTrack(object):
 
         # add bbox_diff and feature to external memory
         self.external_motion.appendleft(bbox_diff)
-        self.external_feature.appendleft(feature)
+        self.external_feat.appendleft(feature)
 
         self.bbox_diff = to_var(bbox_diff).view(1, 1, -1)
 
@@ -98,13 +94,17 @@ class RANTrack(object):
         self.time_since_update += 1
 
         # obtain h, alpha, sigma using RAN
-        alpha_motion, sigma_motion, self.h_motion = self.model(self.bbox_diff, self.h_motion)
+        alpha_motion, sigma_motion, self.h_motion = self.motion_model(self.bbox_diff, self.h_motion)
+        alpha_feat, sigma_feat, self.h_feat = self.motion_model(self.feature, self.h_feat)
 
         # obtain mu using alpha and external memory
         alpha_motion = to_np(alpha_motion.squeeze())
+        alpha_feat = to_np(alpha_feat.squeeze()
+                           )
         self.mu_motion = np.matmul(alpha_motion, np.array(self.external_motion))
-
+        self.mu_feat = np.matmul(alpha_feat, np.array(self.external_feat))
         self.sigma_motion = to_np(sigma_motion.squeeze())
+        self.sigma_feat = to_np(sigma_feat.squeeze())
 
     def mark_missed(self):
         if self.state == TrackState.Tentative:
@@ -141,8 +141,9 @@ class RANTrack(object):
 
 
 class RANTracker(object):
-    def __init__(self, ran_model, max_age=30, memory_size=10):
-        self.ran_model = ran_model
+    def __init__(self, motion_model, feat_model, max_age=30, memory_size=10):
+        self.motion_model = motion_model
+        self.feat_model = feat_model
 
         self.max_age = max_age
         self.memory_size = memory_size
@@ -188,7 +189,7 @@ class RANTracker(object):
         return bbox_list, id_list
 
     def _init_track(self, bbox, feature=None):
-        self.tracks.append(RANTrack(bbox, self._next_id, self.ran_model, feature))
+        self.tracks.append(RANTrack(bbox, self._next_id, self.motion_model, feature))
         self._next_id += 1
 
     def _match(self, detections, features=None):
@@ -232,7 +233,7 @@ class RANTracker(object):
 
 
 if __name__ == '__main__':
-    from models import RAN, load_model
+    from models import RAN
 
     model_save_prefix = "/scratch0/RAN/trained_model/ran"
 
@@ -240,8 +241,7 @@ if __name__ == '__main__':
     ran = RAN(input_size=4,
               hidden_size=32,
               history_size=10,
-              drop_rate=0.5,
-              save_prefix=model_save_prefix)
+              drop_rate=0.5)
     load_model(ran)
     ran = ran.cuda()
     ran.eval()

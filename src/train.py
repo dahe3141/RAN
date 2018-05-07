@@ -1,5 +1,5 @@
 import numpy as np
-import torch as t
+import torch
 from utils import generate_external
 from torch.autograd import Variable
 import time
@@ -70,6 +70,10 @@ class Trainer(object):
 
                 if i == 1:
                     print('Epoch: {}, Loss: {}'.format(epoch, loss.data))
+
+        torch.save({'RAN_motion': self.RAN_motion.state_dict(),
+                    'RAN_feat': self.RAN_feat.state_dict()},
+                   '{}/models/RAN.pth'.format(self.opt.outf))
 
     def prepare_data(self, batch_data):
         # obtain a tensor (max_length, batch_size, feat_dim) and lengths for sequences

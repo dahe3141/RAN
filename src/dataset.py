@@ -30,6 +30,7 @@ class MOT16_train_dataset(Dataset):
     """
     processed_folder = 'processed'
     training_file = 'train.pt'
+    refined_det = 'refined.txt'
     sequence = ['MOT16-13', 'MOT16-11', 'MOT16-10',
                 'MOT16-09', 'MOT16-05', 'MOT16-04', 'MOT16-02']
 
@@ -38,6 +39,7 @@ class MOT16_train_dataset(Dataset):
         self.root = os.path.expanduser(root)
         self.det_dir = os.path.expanduser(det_dir)
         self.saved_path = os.path.join(self.root, self.processed_folder, self.training_file)
+        self.refined_det_path = os.path.join(self.root, self.processed_folder, self.refined_det)
 
         if os.path.exists(self.saved_path):
             print("Loading data from {}".format(self.saved_path))
@@ -75,6 +77,10 @@ class MOT16_train_dataset(Dataset):
         with open(saved_path, 'rb') as f:
             self.bbox, self.motion, self.appearance, self.video_id, self.frame_num, \
                 self.image_filenames = pickle.load(f)
+
+    def _write_det_refined(self):
+        # TODO: write refined detections in MOT format
+        pass
 
 
 # collate_fn([dataset[i] for i in batch_indices])
