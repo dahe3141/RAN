@@ -30,7 +30,6 @@ class MOT16_train_dataset(Dataset):
     """
     processed_folder = 'processed'
     training_file = 'train.pt'
-    refined_det = 'refined.txt'
     sequence = ['MOT16-13', 'MOT16-11', 'MOT16-10',
                 'MOT16-09', 'MOT16-05', 'MOT16-04', 'MOT16-02']
 
@@ -39,7 +38,7 @@ class MOT16_train_dataset(Dataset):
         self.root = os.path.expanduser(root)
         self.det_dir = os.path.expanduser(det_dir)
         self.saved_path = os.path.join(self.root, self.processed_folder, self.training_file)
-        self.refined_det_path = os.path.join(self.root, self.processed_folder, self.refined_det)
+        self.refined_det_path = os.path.join(self.root, self.processed_folder)
 
         if os.path.exists(self.saved_path):
             print("Loading data from {}".format(self.saved_path))
@@ -70,6 +69,8 @@ class MOT16_train_dataset(Dataset):
         det_refined = match_detections(gt_all, det_all)
         bbox, motion, appearance, video_id, frame_num = generate_trainset(det_refined)
 
+        self._write_det_refined(det_refined)
+
         with open(self.saved_path, 'wb+') as f:
             pickle.dump((bbox, motion, appearance, video_id, frame_num, image_filenames), f)
 
@@ -78,9 +79,18 @@ class MOT16_train_dataset(Dataset):
             self.bbox, self.motion, self.appearance, self.video_id, self.frame_num, \
                 self.image_filenames = pickle.load(f)
 
-    def _write_det_refined(self):
-        # TODO: write refined detections in MOT format
-        pass
+        self.motion_dim = self.motion[0].shape[1]
+        self.feat_dim = self.appearance[0].shape[1]
+
+    def _write_det_refined(self, seq_info):
+
+        for i, seq in enumerate(seq_info):
+            seq_name = self.sequence[i]
+            bbox = seq['bbox'].copy()
+            bbox[:, 2:4] += bbox[:, 0:2]
+
+            out = np.hstack((seq['frame_num'][:, None], seq['track_id'][:, None], bbox, seq['feat']))
+            np.savetxt('{}/{}.txt'.format(self.refined_det_path, seq_name), out, delimiter=',', fmt='%.6f')
 
 
 # collate_fn([dataset[i] for i in batch_indices])
@@ -136,18 +146,6 @@ def pad_packed_collate(batch):
 
 if __name__ == '__main__':
     dataset = MOT16_train_dataset('/scratch0/MOT/MOT16', '/scratch0/MOT/MOT16/external')
-    dl = DataLoader(dataset, batch_size=3, shuffle=False, num_workers=1, collate_fn=pad_packed_collate)
-
-    m, _ = dataset[0]
-    print(m[5])
-    print(dataset.bbox[0][5] - dataset.bbox[0][4])
-
-    train_iter = iter(dl)
-    m, a = next(train_iter)
-
-    mm = pad_packed_sequence(m)
-    print(m)
-    print(a)
 
 
 

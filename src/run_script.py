@@ -1,12 +1,7 @@
-import argparse
 import os
-from train import Trainer
-from models import RAN
-
 import torch
+from train import Trainer
 from torch.utils.data import DataLoader
-import torch.nn as nn
-import pickle
 from dataset import MOT16_train_dataset, pad_packed_collate
 
 
@@ -16,9 +11,10 @@ def main():
     opt.dataroot = '/scratch0/MOT/MOT16'
     opt.detroot = '/scratch0/MOT/MOT16/external'
     opt.outf = '../results'
+    opt.history_size = 10
     opt.batch_size = 64
     opt.nepoch = 100
-    opt.use_cuda = True
+    opt.use_cuda = torch.cuda.is_available()
 
     try:
         os.makedirs(opt.outf)
@@ -40,8 +36,8 @@ def main():
                                    shuffle=False,
                                    num_workers=1,
                                    collate_fn=pad_packed_collate)
-    # TODO: add a get_dim method to dataset
-    trainer = Trainer(opt, 4, 32, train_data_loader)
+
+    trainer = Trainer(opt, train_dataset.motion_dim, train_dataset.feat_dim, train_data_loader)
     trainer.train()
 
 

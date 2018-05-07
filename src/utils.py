@@ -541,11 +541,12 @@ def show_track(idx, data_set):
     videofig(len(img_files), redraw_fn, play_fps=30)
 
 
+np.random.seed(0)
 colours = np.random.rand(32, 3) * 512
 colours = [(int(c[0]), int(c[1]), int(c[2])) for c in colours]
 
 
-def save_to_video(video_handle, img_file, img_size, bboxes, id_list):
+def save_to_video(video_handle, img_file, img_size, bboxes, colors, id_list=None):
     """ Write a given frame to the video handle.
     BBoxes should be in the format (x, y, w, h).
 
@@ -553,9 +554,8 @@ def save_to_video(video_handle, img_file, img_size, bboxes, id_list):
 
     # automatically handles the case when bboxes = []
     frame = cv2.imread(img_file)
-    selected_colors = [colours[int(i) % 32] for i in id_list]
 
-    for (bbox, color, track_id) in zip(bboxes, selected_colors, id_list):
+    for i, (bbox, color) in enumerate(zip(bboxes, colors)):
         x, y, w, h = bbox
         x1 = int(x)
         y1 = int(y)
@@ -563,7 +563,8 @@ def save_to_video(video_handle, img_file, img_size, bboxes, id_list):
         y2 = int(y1 + h)
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(frame, str(track_id), (x2, y2), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+        if id_list is not None:
+            cv2.putText(frame, str(id_list[i]), (x2, y2), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
 
     frame = cv2.resize(frame, img_size)
     video_handle.write(frame)

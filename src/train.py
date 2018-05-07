@@ -4,12 +4,11 @@ from utils import generate_external
 from torch.autograd import Variable
 import time
 from torch import optim
+from models import RAN
 import math
 from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence, pack_padded_sequence
 import matplotlib.pyplot as plt
 import progressbar
-
-use_cuda = t.cuda.is_available()
 
 
 class Trainer(object):
@@ -25,8 +24,8 @@ class Trainer(object):
             self.RAN_motion.cuda()
             self.RAN_feat.cuda()
 
-        self.optimizer_motion = optim.Adam(self.RAN_motion.parameters(), lr=1e-4, betas=(0.9, 0.99))
-        self.optimizer_appearance = optim.Adam(self.RAN_feat.parameters(), lr=1e-4, betas=(0.9, 0.99))
+        self.optimizer_motion = optim.Adam(self.RAN_motion.parameters(), lr=1e-3, betas=(0.9, 0.999))
+        self.optimizer_feat = optim.Adam(self.RAN_feat.parameters(), lr=1e-3, betas=(0.9, 0.999))
 
     def train(self):
         self.RAN_motion.train()
@@ -54,6 +53,9 @@ class Trainer(object):
                 loss.backward()
                 self.optimizer_motion.step()
 
+                if i == 1:
+                    print('Epoch: {}, M Loss: {}'.format(epoch, loss.cpu().data.numpy()))
+
                 ########
                 # Train appearance model
                 ########
@@ -69,7 +71,7 @@ class Trainer(object):
                 self.optimizer_feat.step()
 
                 if i == 1:
-                    print('Epoch: {}, Loss: {}'.format(epoch, loss.data))
+                    print('Epoch: {}, A Loss: {}'.format(epoch, loss.cpu().data.numpy()))
 
         torch.save({'RAN_motion': self.RAN_motion.state_dict(),
                     'RAN_feat': self.RAN_feat.state_dict()},
@@ -82,7 +84,7 @@ class Trainer(object):
 
         ext = generate_external(padded_batch.data.numpy()[:-1],
                                 lengths, self.opt.history_size)
-        ext = Variable(t.from_numpy(ext), requires_grad=False)
+        ext = Variable(torch.from_numpy(ext), requires_grad=False)
 
         # generate input from t=0 to t=L-2
         packed_input = pack_padded_sequence(padded_batch[:-1], lengths)
@@ -116,9 +118,9 @@ def loss_fn(alpha, sigma, x, ext, lengths):
     # assert x.data[S, -1, :].sum() == 0
     # assert ext.data[S, -1, :, :].sum() == 0
 
-    mu = t.matmul(ext, alpha.unsqueeze(-1)).squeeze()
-    diff = t.pow(x - mu, 2)
-    M = t.matmul(diff.unsqueeze(2),
+    mu = torch.matmul(ext, alpha.unsqueeze(-1)).squeeze()
+    diff = torch.pow(x - mu, 2)
+    M = torch.matmul(diff.unsqueeze(2),
                  1 / sigma.unsqueeze(-1)).sum()  # Mahalanobis distance
     log_det = sigma.log().sum()
     # sum over all sequence of all batch of all features
@@ -127,6 +129,8 @@ def loss_fn(alpha, sigma, x, ext, lengths):
     # mu.size(-1) * math.log(2 * math.pi))
     return 0.5 * (log_det + M + c)
 
+
+use_cuda = True
 
 def trainIters(model, dataloader, n_epoch, lr=0.001, betas=(0.9, 0.99), eps=1e-8):
     if use_cuda:
@@ -172,7 +176,7 @@ def trainIters(model, dataloader, n_epoch, lr=0.001, betas=(0.9, 0.99), eps=1e-8
 
             alpha, sigma, h_n = model(packed_input, hidden)
 
-            ext = Variable(t.from_numpy(ext), requires_grad=False)
+            ext = Variable(torch.from_numpy(ext), requires_grad=False)
 
             if use_cuda:
                 ext, padded_batch = ext.cuda(), padded_batch.cuda()
