@@ -142,7 +142,7 @@ if __name__ == '__main__':
 
     RAN_motion.eval()
     RAN_feat.eval()
-    tracker = RANTracker(ran)
+    tracker = RANTracker(RAN_motion, feat_model=None)
 
     for frame_idx in seq_info['image_filenames'].keys():
         bboxes, confs = create_detections(seq_info['groundtruth'], frame_idx)

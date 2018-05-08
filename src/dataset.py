@@ -145,7 +145,8 @@ def pad_packed_collate(batch):
 
 
 if __name__ == '__main__':
-    dataset = MOT16_train_dataset('/scratch0/MOT/MOT16', '/scratch0/MOT/MOT16/external')
+    dataset = MOT16_train_dataset(os.path.expanduser('~/Projects/Datasets/MOT16'),
+                                  os.path.expanduser('~/Projects/Datasets/MOT16/external'))
 
 
 

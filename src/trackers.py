@@ -28,125 +28,154 @@ class TrackState(object):
     Deleted = 3
 
 
+class Detection(object):
+    def __init__(self, bbox=None, feat=None):
+        """
+            bbox in (x, y, w, h) format
+        """
+        self.bbox = self._centering(bbox)
+        self.feat = feat
+
+    def _centering(self, bbox):
+        if bbox is not None:
+            cx = bbox[0] + bbox[2] / 2.0
+            cy = bbox[1] + bbox[3] / 2.0
+            w = bbox[2]
+            h = bbox[3]
+            return np.array([cx, cy, w, h])
+        else:
+            return None
+
+
+class _RANTrackObject(object):
+    def __init__(self, state, ran_model):
+        self.inactive = False
+
+        if ran_model is None:
+            self.inactive = True
+            return
+
+        memory_size = ran_model.history_size
+
+        state_dim = ran_model.input_size
+        self.ran_model = ran_model
+        self.hidden = ran_model.init_hidden(batch_size=1)
+
+        # external memory
+        self.external = deque([np.zeros(state_dim, dtype=np.float32) for _ in range(memory_size)],
+                                     maxlen=memory_size)
+        self.update(state)
+
+    def inactivate(self):
+        self.inactive = True
+
+    def update(self, state):
+        if self.inactive:
+            return
+        self.external.appendleft(state)
+        self.state = to_var(state).view(1, 1, -1)
+
+    def predict(self):
+        if self.inactive:
+            return
+        alpha, var, self.hidden = self.ran_model(self.state, self.hidden)
+        alpha = to_np(alpha.squeeze())
+        self.mu = np.matmul(alpha, np.array(self.external))
+        self.var = to_np(var.squeeze())
+
+    def similarity(self, state):
+        if self.inactive:
+            return 0
+
+        diff2 = (state - self.mu) ** 2
+        M = (diff2 / self.var).sum()
+        log_scale = np.log(self.var).sum()
+        constant = math.log(2 * math.pi) * len(state)
+
+        return -0.5 * (constant + log_scale + M)
+
+
 class RANTrack(object):
-    def __init__(self, bbox, track_id, motion_model, feature=None, feat_model=None, n_init=3, max_age=10):
+    def __init__(self, track_id, detection, motion_model=None, feat_model=None, n_init=3, max_age=10):
         self.track_id = track_id
         self.age = 1
         self.hits = 1
         self.time_since_update = 0
-        self.state = TrackState.Tentative
+        self.track_status = TrackState.Tentative
 
         self._max_age = max_age
         self._n_init = n_init
 
-        self.prev_bbox = bbox
+        # detection.bbox is always not None
+        self.state_bbox = detection.bbox
 
-        # RAN include:
-        #     (1)RNN hidden states
-        #     (2)alpha, sigma
-        #     (3)external memory
-        #
-        # mean of the AR model will be estimated through linear combination
+        self.track_motion = _RANTrackObject(detection.bbox - self.state_bbox, motion_model)
+        self.track_feat = _RANTrackObject(detection.feat, feat_model)
 
-        memory_size = motion_model.history_size
-
-        motion_dim = motion_model.input_size
-        feat_dim = feat_model.input_size
-
-        self.motion_model = motion_model
-        self.feat_model = feat_model
-        self.h_motion = motion_model.init_hidden(batch_size=1)
-        self.h_feat = feat_model.init_hidden(batch_size=1)
-
-        # external memory
-        self.external_motion = deque([np.zeros(motion_dim, dtype=np.float32) for _ in range(memory_size)], maxlen=memory_size)
-        self.external_feat = deque([np.zeros(feat_dim, dtype=np.float32) for _ in range(memory_size)], maxlen=memory_size)
-
-        self.update(bbox, feature)
-
-    def update(self, bbox, feature=None):
-        """
-        compute bbox_diff and external memory using the associated detection
-        """
+    def update(self, detection):
         self.hits += 1
         self.time_since_update = 0
 
-        if self.state == TrackState.Tentative and self.hits >= self._n_init:
-            self.state = TrackState.Confirmed
+        if self.track_status == TrackState.Tentative and self.hits >= self._n_init:
+            self.track_status = TrackState.Confirmed
 
-        # compute bbox_diff
-        bbox_diff = bbox - self.prev_bbox
-        self.prev_bbox = bbox
+        bbox_diff = detection.bbox - self.state_bbox
+        # save associated bbox
+        self.state_bbox = detection.bbox
 
-        # add bbox_diff and feature to external memory
-        self.external_motion.appendleft(bbox_diff)
-        self.external_feat.appendleft(feature)
-
-        self.bbox_diff = to_var(bbox_diff).view(1, 1, -1)
-
-        if feature is not None:
-            self.feature = to_var(feature).view(1, 1, -1)
-        else:
-            self.feature = None
+        self.track_motion.update(bbox_diff)
+        self.track_feat.update(detection.feat)
 
     def predict(self):
         self.age += 1
         self.time_since_update += 1
 
-        # obtain h, alpha, sigma using RAN
-        alpha_motion, sigma_motion, self.h_motion = self.motion_model(self.bbox_diff, self.h_motion)
-        alpha_feat, sigma_feat, self.h_feat = self.motion_model(self.feature, self.h_feat)
-
-        # obtain mu using alpha and external memory
-        alpha_motion = to_np(alpha_motion.squeeze())
-        alpha_feat = to_np(alpha_feat.squeeze()
-                           )
-        self.mu_motion = np.matmul(alpha_motion, np.array(self.external_motion))
-        self.mu_feat = np.matmul(alpha_feat, np.array(self.external_feat))
-        self.sigma_motion = to_np(sigma_motion.squeeze())
-        self.sigma_feat = to_np(sigma_feat.squeeze())
+        self.track_motion.predict()
+        self.track_feat.predict()
 
     def mark_missed(self):
-        if self.state == TrackState.Tentative:
-            self.state = TrackState.Deleted
+        if self.track_status == TrackState.Tentative:
+            self.track_status = TrackState.Deleted
         elif self.time_since_update > self._max_age:
-            self.state = TrackState.Deleted
+            self.track_status = TrackState.Deleted
 
     def is_tentative(self):
         """Returns True if this track is tentative (unconfirmed).
         """
-        return self.state == TrackState.Tentative
+        return self.track_status == TrackState.Tentative
 
     def is_confirmed(self):
         """Returns True if this track is confirmed."""
-        return self.state == TrackState.Confirmed
+        return self.track_status == TrackState.Confirmed
 
     def is_deleted(self):
         """Returns True if this track is dead and should be deleted."""
-        return self.state == TrackState.Deleted
+        return self.track_status == TrackState.Deleted
 
-    def similarity(self, bbox, feature=None):
+    def similarity(self, detection):
         """
         Computes similarity between the RANTrack and a detection
         """
-        # TODO: similarity should handle feature
-        # compute log probability
-        diff2 = (self.mu_motion - (bbox - self.prev_bbox)) ** 2
-        M = (diff2 / self.sigma_motion).sum()
-        log_scale = np.log(self.sigma_motion).sum()
+        bbox_diff = detection.bbox - self.state_bbox
 
-        constant = math.log(2 * math.pi) * len(bbox)
-
-        return -0.5 * (constant + log_scale + M)
+        return self.track_motion.similarity(bbox_diff) + self.track_feat.similarity(detection.feat)
 
 
 class RANTracker(object):
-    def __init__(self, motion_model, feat_model, max_age=30, memory_size=10):
+    def __init__(self, motion_model, feat_model, max_age=10):
+        """
+        Parameters:
+            motion_model
+            feat_model
+            max_age
+
+        Note:
+            Inactivate motion or appearance model by passing 'None'
+        """
         self.motion_model = motion_model
         self.feat_model = feat_model
 
         self.max_age = max_age
-        self.memory_size = memory_size
         self.min_similarity = -2e4
 
         self.tracks = []
@@ -159,21 +188,21 @@ class RANTracker(object):
         for track in self.tracks:
             track.predict()
 
-    def update(self, bboxes, features=None):
+    def update(self, detections):
 
         # run matching
-        matches, unmatched_tracks, unmatched_detections = self._match(bboxes)
+        matches, unmatched_tracks, unmatched_detections = self._match(detections)
 
         # update tracks
         for detection_idx, track_idx in matches:
-            self.tracks[track_idx].update(bboxes[detection_idx])
+            self.tracks[track_idx].update(detections[detection_idx])
 
         # mark missed tracks
         for track_idx in unmatched_tracks:
             self.tracks[track_idx].mark_missed()
         # initiate new tracks
         for detection_idx in unmatched_detections:
-            self._init_track(bboxes[detection_idx])
+            self._init_track(detections[detection_idx])
 
         self.tracks = [t for t in self.tracks if not t.is_deleted()]
 
@@ -183,16 +212,20 @@ class RANTracker(object):
         for track in self.tracks:
             if not track.is_confirmed() or track.time_since_update > 1:
                 continue
-            bbox_list.append(track.prev_bbox)
+            bbox_list.append(track.state_bbox)
             id_list.append(track.track_id)
 
         return bbox_list, id_list
 
-    def _init_track(self, bbox, feature=None):
-        self.tracks.append(RANTrack(bbox, self._next_id, self.motion_model, feature))
+    def _init_track(self, detection):
+        self.tracks.append(RANTrack(self._next_id,
+                                    detection,
+                                    self.motion_model,
+                                    self.feat_model,
+                                    max_age=self.max_age))
         self._next_id += 1
 
-    def _match(self, detections, features=None):
+    def _match(self, detections):
         """
 
 
@@ -242,7 +275,6 @@ if __name__ == '__main__':
               hidden_size=32,
               history_size=10,
               drop_rate=0.5)
-    load_model(ran)
     ran = ran.cuda()
     ran.eval()
 
